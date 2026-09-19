@@ -106,6 +106,41 @@ the shipped per-language files it read have been deleted. **A store seeds its de
 whatever the language** — translate storefront copy by writing the values through
 `section_manager/global_settings`.
 
+**How much that covers — so you can state it precisely instead of hedging.** Measured on a stock
+install, 19-09-2026:
+
+| | count | how you reach it |
+|---|---|---|
+| **settings copy** | **201 keys** across 12 compos — product 52, thankyou 26, plist1 26, cart 21, search 20, checkout 16, reviewlist 16, catlist 10, footer 5, tracking 5, header 2, store 2 | you write them, through this door. The schema flags each one `translatable: true`, so it is an enumeration, not a hunt |
+| **baked into PHP/JS** | **74 strings** in frontend code, 18 of which duplicate a settings default — leaving **56** with no settings equivalent | nothing you can call. English until a `.mo` ships |
+
+Of those 56, about **10 never reach a shopper at all** (preview-editor chrome, "No blocks
+configured for quickview", internal agent-bot notices) and about **21 are ARIA labels** — invisible
+to a sighted shopper, though not to one running a screen reader in the store's language. That
+leaves roughly **25 genuinely visible strings**, and they cluster into five groups worth naming
+when you report them:
+
+- **order validation and failure** — "Please fill in all required fields to complete your order.",
+  "Could not save your order, please try again." The worst moment for English to appear.
+- **stock and waitlist** — "This item is out of stock", "You are on the list …"
+- **bot protection** — the Turnstile and rate-limit messages, seen only when one triggers
+- **the catlist filter's "All" chip** — note the listing EMPTY-STATE messages are NOT in this list:
+  since 19-09-2026 all three listings read `filter_no_results_message` on first paint as well as
+  after a filter, so an empty products / categories / reviews list IS translatable through
+  `section_manager/global_settings`. An earlier version of this page listed them as baked in.
+- **the review badge and relative time** — "Verified Purchase", "ago"
+
+**Report it as a number, not a disclaimer.** *"201 keys written in Arabic; about 25 visible strings
+stay English, here they are"* is true and actionable. *"I cannot fully translate the storefront"*
+is neither — it describes a store whose copy IS in the merchant's language, with a short listable
+tail, and the merchant deserves the list rather than the hedge.
+
+⚠️ **The `langue_code` translation pack is WordPress's, not ours.** Setting `ar` installs the
+Arabic pack, which translates core and the theme. This plugin ships `codlfw.pot` at **0 bytes**
+and no `.mo` or `.po` in any language, so no pack ever reaches the 57 above. If that changes and
+translation files start shipping, this whole section shrinks to nothing — re-measure rather than
+trusting the counts.
+
 ## The funnel pages — one call, and the store takes orders it can confirm
 
 **In phase 4, call `POST stores/ensure_pages` once. No body, no id, no condition.**

@@ -240,10 +240,33 @@ async function main(base) {
     return { status: res.status, body };
   };
 
+  /*
+   * A 403 FROM THIS API IS NOT ALWAYS AUTH OR SCOPE. The HTTPS gate answers
+   * 403 `cl_api_https_required` when the store sits behind a TLS proxy the plugin cannot recognise
+   * — and on such a host it fires INTERMITTENTLY, so the same URL with the same key fails one call
+   * and succeeds the next. Branching on the status alone therefore tells the merchant either that
+   * their key is bad or that a door they own has no scope, and both send them to fix something that
+   * was never wrong. Measured on a live Hostinger store, v1.2.750: 4 of 12 identical authenticated
+   * GETs refused this way.
+   *
+   * Checked at all THREE 403 sites, not just `/me`: because the failure is intermittent, `/me` can
+   * pass and a later door probe still catch it, which would print "no scope for it" about a door the
+   * key can open.
+   */
+  const isHttpsRefusal = (res) => res.status === 403 && res.body?.code === 'cl_api_https_required';
+  const HTTPS_HINT = 'the site is behind a TLS proxy the plugin cannot see through — your key is fine';
+
   console.log(`\nPreflight → ${base}\n`);
 
   const me = await call('me');
 
+  if (isHttpsRefusal(me)) {
+    console.error('  ✗ the store refused the request as non-HTTPS (403 cl_api_https_required).');
+    console.error(`    ${HTTPS_HINT}.`);
+    console.error('    It often refuses only SOME requests, so retrying can appear to work.');
+    console.error('    The site owner can resolve it with the `cl_api_is_ssl` filter.\n');
+    return 1;
+  }
   if (me.status === 401 || me.status === 403) {
     console.error(`  ✗ the key was rejected (HTTP ${me.status}).`);
     console.error('    Check it was copied whole — a key is shown once, at creation.\n');
@@ -283,6 +306,9 @@ async function main(base) {
   console.log('\nDoors this build needs — probed, not assumed:\n');
   const missing = [];
   const forbidden = [];
+  // Tracked SEPARATELY from `forbidden`: an HTTPS refusal is not a scope problem and must not tell
+  // the merchant to go tick a permission. It still has to stop the build — see the STOP gate.
+  const httpsRefused = [];
 
   for (const [slug, [fallback, why]] of Object.entries(NEEDED)) {
     const path = pathFor(slug, fallback, me.body.resources);
@@ -296,6 +322,9 @@ async function main(base) {
      */
     if (res.status === 200 || res.status === 400) {
       line(true, path);
+    } else if (isHttpsRefusal(res)) {
+      line(false, `${path.padEnd(32)} — HTTPS gate refused it, not a scope problem. ${HTTPS_HINT}`);
+      httpsRefused.push(path);
     } else if (res.status === 403) {
       line(false, `${path.padEnd(32)} — no scope for it. ${why}`);
       forbidden.push(path);
@@ -331,6 +360,8 @@ async function main(base) {
     const res = spec.method === 'POST' ? await post(path, spec.body) : await call(`${path}?per_page=1`);
     if (res.status === 200 || res.status === 400) {
       line(true, path);
+    } else if (isHttpsRefusal(res)) {
+      line(false, `${path.padEnd(32)} — HTTPS gate refused it, not a scope problem. ${HTTPS_HINT}`);
     } else if (res.status === 403) {
       line(false, `${path.padEnd(32)} — no scope. ${why}`);
     } else {
@@ -357,8 +388,18 @@ async function main(base) {
     ? 'codbrand-content-builder installed — it renders the pages'
     : 'codbrand-content-builder NOT installed — required to build any page');
 
-  if (forbidden.length || missing.length) {
+  if (forbidden.length || missing.length || httpsRefused.length) {
     console.error('\nSTOP. This key cannot complete a build.');
+
+    if (httpsRefused.length) {
+      console.error('\nThe store refused these as non-HTTPS (403 cl_api_https_required):\n');
+      for (const m of httpsRefused) console.error(`    • ${m}`);
+      console.error('\nThe key is fine and the scopes are fine — the site sits behind a TLS proxy the');
+      console.error('plugin cannot see through. It often refuses only SOME requests, so a retry that');
+      console.error('appears to work has not fixed anything: a build makes hundreds of calls and a');
+      console.error('fraction of them will fail part-way through, leaving half-written pages.');
+      console.error('The site owner resolves it with the `cl_api_is_ssl` filter.');
+    }
 
     if (forbidden.length) {
       console.error('\nThe key is missing a scope for:\n');

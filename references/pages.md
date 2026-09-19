@@ -124,12 +124,25 @@ The renderer places whatever assets you hand it. **Generate the photos first, up
 the returned URLs**, so it never has to invent a source.
 
 - **Photos** — product shots, hero imagery, anything the page is actually about. You produce them by
-  whatever means you have: another skill, a local tool, your own generation. Then `POST /media`,
-  and use the `url` it returns. It also returns an `id`, which is what a `wp:image` block wants for
-  its `wp-image-{id}` class.
-- **A store must never ship a hotlinked or placeholder photo.** `placehold.co` boxes and images
-  pointing at someone else's server are a store that breaks when that server does — and they read as
-  unfinished to the one visitor who matters.
+  whatever means you have: another skill, a local tool, your own generation, or a source you
+  download under a permissive licence. Then `POST /media`, and use the `url` it returns. It also
+  returns an `id`, which is what a `wp:image` block wants for its `wp-image-{id}` class.
+- **Sourcing an image from the web is allowed. Hotlinking it is not.** With no way to generate one,
+  fetch from a permissively-licensed source, download the bytes, upload them, and use the URL the
+  upload returns — the same door and the same end state as a merchant emailing you the file. Keep
+  each image's licence and its attribution requirement with the blueprint, and prefer sources that
+  ask for neither. **Product photos are the exception, and it is not a small one** — next bullet.
+- **A product photo is the merchant's real product. Never stock, never a lookalike.** COD is what
+  makes this sharper here than on an ordinary store: the customer pays cash *at the door*, so a
+  photo of something the box does not contain is not a refund, it is a refusal — the merchant pays
+  both freight legs and the sale is gone. Hero, lifestyle, category tiles and backgrounds carry no
+  such risk and may be sourced. If you can neither generate nor obtain a true photo of the product,
+  **stop and ask the merchant for it**: a build that pauses beats one that ships a stranger's
+  product.
+- **A store must never ship a hotlinked or placeholder photo, whatever the image's source.**
+  `placehold.co` boxes and images pointing at someone else's server are a store that breaks when
+  that server does — and they read as unfinished to the one visitor who matters. Every image the
+  store renders lives in the store's own media library.
 - **Icons are your call.** Inline the SVG yourself, use an icon service, use any tool you like.
   Inlining is the more durable choice, since nothing external can withdraw it; a service is
   perfectly reasonable for small glyphs and avoids filling the media library with them.
