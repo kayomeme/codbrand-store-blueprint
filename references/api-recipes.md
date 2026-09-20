@@ -365,10 +365,16 @@ A logo is two writes, not one, and the failure mode is silent.
 4. **Point BOTH places at it.** The header design carries its own logo fields, and the site-wide logo
    is a column on **`stores`** — `site_logo_id`. Setting only one leaves the other showing nothing.
 
-   ⚠️ **Not `store_settings`, despite what that door's own hint says.** Its hint reads "the site title,
-   tagline and logo", but it exposes no logo field and will refuse one; the writable column is on
-   `stores`. An earlier version of this page sent readers to the wrong door on the strength of that
-   sentence. When a hint and a field list disagree, the field list wins.
+   ⚠️ **The logo and the favicon are two different images, and `store_settings` writes both.**
+   `site_logo_id` is the wide brand mark and is what search engines get as the organisation logo;
+   `site_icon_id` is the square favicon. Either door can write either field — `store_settings` by
+   name, or `stores` as columns.
+
+   *This paragraph has been wrong twice today, so here is the whole of it. It first said
+   `store_settings` "exposes no logo field and will refuse one", which was false — it wrote the logo
+   column under the name `site_icon_id`. That was corrected to "they are ONE column, write it once",
+   which was true for a few hours and is now false too: the owner split them, so there are genuinely
+   two images. If you are reading a store built before the split, its logo column may hold a favicon.*
 
 ⚠️ **If you have no image, leave the slot ON — turning it off is what actually produces nothing.**
 An earlier version of this page said the opposite (`logo_image_is_active` → `no` "ships a text
