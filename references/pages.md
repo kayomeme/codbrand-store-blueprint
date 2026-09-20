@@ -44,7 +44,7 @@ stale legal rule is worse than none**, so no jurisdiction rule is baked in here.
 | | where it lives |
 |---|---|
 | **Stable category expectations** — a cosmetics store has an ingredients surface, an apparel store has a size guide | this file, above |
-| **Jurisdiction-specific legal content** | **asked, never asserted.** Create the slot, draft it clearly marked unverified, say plainly what you do not know, and make the merchant confirm it. |
+| **Jurisdiction-specific legal content** | **asked, never asserted.** Create the slot, draft it clearly marked unverified, say plainly what you do not know, and make the merchant confirm it. **"Confirm" does not mean WAIT** — the page is written and published like every other, marked unverified; confirmation is something they owe the page before relying on it, not something the build stops for. |
 
 **Never claim compliance, and never present a draft as legal advice.** Say which market each page was
 drafted for, and that a local check is the merchant's to make.
@@ -91,6 +91,13 @@ unit**, so adopting a form later is a local change rather than a rewrite.
 
 For each page, decide and record: its **purpose** in one line, its **sections in order**, and **what
 each section needs** (a heading, a claim plus evidence, a list, an image).
+
+⚠️ **This applies to EVERY page, not just the home page, and a live build proved it does not happen
+by itself.** Measured 20-09-2026: seven authored pages shipped as headings and paragraphs on a plain
+card — an FAQ that was a wall of text, no imagery, no sections. Each one is a document, not a page.
+A merchant can edit words; they cannot build the layout you skipped, so a prose page hands them the
+one job they came here to avoid. **A missing fact is never the reason** — fill it (see SKILL.md →
+"Asking") and lay the page out anyway.
 
 Then render that structure as block markup and publish it — see "Rendering it" below. You decide
 what the page *says* and in what order; rendering is mechanical once that is settled.
@@ -159,7 +166,7 @@ re-uploading into a library with no delete.
 | # | invariant | why |
 |---|---|---|
 | 1 | **Every product has a featured image** | the listing card, the cart line and every share preview fall back to nothing without it |
-| 2 | **Every product has at least 4 gallery images** | a product page with one photo reads as a placeholder listing, and a COD shopper being asked to hand over cash at the door is already looking for a reason not to |
+| 2 | **Every product has at least 2 gallery images** (4 until 20-09-2026 — see `handover.mjs`) | a product page with one photo reads as a placeholder listing, and a COD shopper being asked to hand over cash at the door is already looking for a reason not to |
 | 3 | **One aspect ratio**, matched to the listing's image box | the most visible defect a build can ship, and no status code reveals it — the grid crops each card differently and stops lining up |
 | 4 | **One format and one long-edge pixel size** | mixed formats mean mixed compression behaviour; mixed sizes mean different sharpness in one grid |
 

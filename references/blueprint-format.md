@@ -104,6 +104,20 @@ The archetype list is deliberately dynamic (see `archetypes.md`). A blueprint th
 | `page_list` | which pages this store needs, and why each |
 | `page_structure` | per page: purpose, sections, what each section needs |
 | `copy` | the translatable settings keys, in their language |
+| `features` | the FEATURE CHECKLIST as they left it — `{ "reviews": "on", "countdown": "off", … }` |
+
+### `features` — record what they UNTICKED, or a re-run re-offers it
+
+The checklist is pre-ticked from the archetype and the merchant corrects it (`archetypes.md` → "The
+checklist"). Write the RESULT here, every key, including the ones left ticked.
+
+**Why every key and not just the changes:** a later session cannot tell "they said no to the
+countdown" from "the countdown was never offered" unless both are written down. Without this the
+re-run proposes a feature the merchant has already declined, which reads as not listening — and it
+is the same class of mistake as asking a question whose answer is already on the store.
+
+An `"off"` here is a merchant's decision and outranks the archetype's default on every later run.
+They can change it back at any time by saying so.
 
 ### `language` carries a script, and it is not decoration
 

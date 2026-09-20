@@ -100,23 +100,72 @@ judgement and cannot be derived from a list of resource names.
 | **Sage** | reviews · variations (strength, format) · stock_waitlist | countdown, stories |
 | **Magician** | qty offers · countdown · upsells · stories · coupons | — this is the archetype that legitimately uses all of it |
 
-**What you DO with that list depends on `--mode`, and the two are deliberately different:**
+**That table is the CHECKLIST's default ticks.** Since 20-09-2026 there is no `--mode` and a store
+is always built in full: every feature the install actually has is LISTED for the merchant, and the
+ones this archetype reaches for arrive already TICKED. They untick what they do not want, before the
+build or at any time after.
 
-| mode | obligation |
+| | |
 |---|---|
-| **merchant** | **OFFER.** Propose it in plain words — *"stores like yours usually sell the same product in several sizes; shall I set that up?"* — and let them decline. A feature the merchant will not operate is worse than no feature. |
-| **demo** | **BUILD.** Showing the product off IS the job, and an unexercised feature is invisible to whoever is evaluating the plugin. |
+| **you decide** | which boxes start ticked — the table above, never a question |
+| **they correct** | anything they disagree with, and the agent applies it |
 
-⚠️ **Demo mode means everything the ARCHETYPE supports, not everything that exists.** A demo with
-every feature switched on is a kitchen sink, not a showcase: a single-product funnel wants qty offers
-and a countdown and has no business carrying variations, and a fashion demo is the reverse. The
-archetype already decides palette and pages — it decides the feature set the same way.
+⚠️ **Ticking everything is still wrong, and this warning is why the ticks are archetype-driven.** A
+store with every feature switched on is a kitchen sink, not a storefront: a single-product funnel
+wants qty offers and a countdown and has no business carrying variations, and a fashion store is the
+reverse. The archetype decides the ticks exactly as it decides the palette and the pages. **"Build
+the maximum" means build everything TICKED — not tick everything.**
 
-**Ask only what the merchant alone can know.** This skill's own opening rule is *"Carry the taste for
-them. Ask only what they alone can know. Decide everything else."* So never ask *"do you want
-quantity offers?"* — that is a decision you carry. Ask the fact you cannot know: *"do you sell the
-same product in several sizes or colours?"*, *"do you run promotions?"* — then decide the feature
-yourself. A skill that asks about all eight features has handed its job back to the merchant.
+**Never ask an OPEN question about a feature.** *"Do you want quantity offers?"* hands your judgement
+back to someone who has never seen one, and this skill's opening rule is *"Carry the taste for them.
+Ask only what they alone can know. Decide everything else."*
+
+A pre-ticked list is **not** that question. It is the decision you already made, shown so it can be
+corrected. The whole difference is whether YOU answered first.
+
+*An earlier version of this section said a skill that puts all eight features in front of the
+merchant "has handed its job back to them". That was written when the only alternative was an open
+question, and it is why the skill had no way to show a merchant what it had chosen. The rule now
+draws the line at asking, not at showing.*
+
+So still ask the FACT you cannot know — *"do you sell the same product in several sizes or
+colours?"*, *"do you run promotions?"* — and still decide the feature yourself. The checklist
+displays that decision; it does not outsource it.
+
+**Label every row in plain language, or the list is worse than no list.** A merchant can judge the
+right column and not the left:
+
+## The checklist
+
+**What the install HAS still comes from the install** — `preflight.mjs` prints what `GET /me`
+returns, and a capability absent there is absent whatever this file says. What lives here is the
+LABEL for each one, because a merchant can judge the right column and not the left:
+
+| the resource | how you write it on the checklist |
+|---|---|
+| `reviews` | **Customer reviews** — star ratings and review cards on the product page |
+| `qty_offers` | **Quantity discounts** — "buy 2, save 10%", shown as a choice on the product page |
+| `product_variations` | **Product options** — the same product in several sizes or colours |
+| `product_upsells` | **You may also like** — a strip of related products under the main one |
+| `quickview` | **Quick view** — open a product from the grid without leaving the page |
+| `stories` | **Stories** — tappable full-screen slides, like Instagram |
+| `coupons` | **Discount codes** — a code box at checkout |
+| `stock_waitlist` | **Back-in-stock alerts** — customers leave an email when something sells out |
+| `tracking_*` | **Ad tracking** — Facebook, TikTok, Snapchat, GA4, Google Ads |
+
+⚠️ **Two things on the checklist are NOT resources, so `/me` will never list them.** They are design
+settings, and a checklist built only from `/me` silently drops them — including `countdown`, which
+the reach-for table above names for three archetypes:
+
+| | |
+|---|---|
+| **Countdown timer** | urgency bar above the add-to-cart button |
+| **Search** | the search bar in the header, and the results page |
+
+**Order the list by what the shopper meets first** — reviews and options before back-in-stock
+alerts — not by resource name. And keep it FLAT: nothing hidden behind a group.
+
+
 
 ## When the merchant named a NICHE and not a site — find three exemplars
 

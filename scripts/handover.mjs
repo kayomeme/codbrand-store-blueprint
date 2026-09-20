@@ -65,8 +65,13 @@ const MIN_REASON = 20;
 
 /* A gallery shorter than this is not a gallery. Owner's rule: every product carries a featured image
  * AND at least this many gallery images. Deliberately hard, with no escape flag — unlike the
- * wordmark, there is no store for which "one photo per product" is a considered decision. */
-const MIN_GALLERY = 4;
+ * wordmark, there is no store for which "one photo per product" is a considered decision.
+ *
+ * 4 -> 2 on 20-09-2026, with the always-build-a-complete-store change. Every store is now built in
+ * full, so the catalogue is 10 products and the gallery is the single slowest step in a build: at 4
+ * it is 50 images, at 2 it is 30. Two still refutes "one photo reads as a placeholder", which is the
+ * reason this rule exists; four was buying polish at the cost of the merchant waiting. */
+const MIN_GALLERY = 2;
 
 /* Aspect ratios within this fraction of each other count as the same ratio. Generation rounds to
  * whole pixels, so 1200x1600 and 1201x1600 are the same intent and must not be reported as drift. */
@@ -551,7 +556,22 @@ async function main(base) {
   }
 
   line(true, 'nothing switched on and empty; the logo is whole; icons resolve; photography is consistent');
-  console.log('\n  That is everything a script can tell you. Now open the store and judge what it');
+  // THE REPLACE-LIST. Since 20-09-2026 a store is built in full out of PLACEHOLDER content, so
+  // "passes every check" and "ready for customers" stopped being the same sentence. The script
+  // cannot compute this -- it has no way to tell an invented product from a real one -- so it
+  // DEMANDS it rather than half-guessing it. Writing it is the last step of the build.
+  console.log('\n  NOW WRITE THE REPLACE-LIST. This store is built from placeholder content and it');
+  console.log('  looks finished. Name every piece that is not theirs yet, where it is, and tell');
+  console.log('  them they can simply ask you to change it:\n');
+  console.log('      - the reviews        how many, and on which products');
+  console.log('      - the product photos generated, not photographs of their products');
+  console.log('      - contact details    phone, email, address, social links');
+  console.log('      - policy values      return window, delivery time, shipping cost');
+  console.log('      - anything else you invented rather than found\n');
+  console.log('  A merchant who never reads it ships placeholders as real. Do not shorten it to');
+  console.log('  "review the content" -- name the items.\n');
+
+  console.log('  That is everything a script can tell you. Now open the store and judge what it');
   console.log('  cannot: is the topbar copy theirs or the shipped line, and does it read as one brand?\n');
   return 0;
 }

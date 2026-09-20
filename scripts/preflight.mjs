@@ -2,13 +2,13 @@
 /**
  * preflight.mjs — can this key actually build a store here?
  *
- *   node preflight.mjs <site-url> <api-key> --mode=<demo|merchant> --country=<CC> --market=<CC>
+ *   node preflight.mjs <site-url> <api-key> --country=<CC> --market=<CC>
  *
  * Answers five questions before any work starts, so a build cannot die half-done:
  *   1. does the plugin's API answer at this URL at all?
  *   2. what may this key do?
  *   3. is any door the build NEEDS missing or unreachable — and which OPTIONAL ones are absent?
- *   4. WHICH KIND OF BUILD is this, and for WHERE?          (--mode / --country / --market)
+ *   4. WHERE are the seller and the customer?               (--country / --market)
  *   5. what design systems does this install already have?  (icons, fonts, palette, presets)
  *
  * WHY 4 AND 5 ARE HERE RATHER THAN IN THE PROSE. Everything this skill asks for in a document can
@@ -18,10 +18,9 @@
  * anywhere. An optional gate is not a gate. So the questions that decide the shape of a build are
  * asked by a script that exits non-zero, not by a paragraph.
  *
- *   --mode      `demo` builds every feature the archetype supports, because showing the product off
- *               IS the job. `merchant` OFFERS a feature and lets them decline. Never inferred:
- *               guessing wrong either imposes features on a merchant who will not operate them, or
- *               ships a demo that hides the product.
+ *   (--mode was removed on 20-09-2026. A store is now always built in full and the archetype sets
+ *   which boxes start ticked on the feature checklist -- see references/archetypes.md. Nothing
+ *   chooses between building and offering any more, so nothing needed the flag.)
  *   --country   where the SELLER is.
  *   --market    where the CUSTOMER is. Kept separate on purpose — consumer-protection obligations
  *               usually follow the customer, so one question would silently pick the wrong
@@ -58,7 +57,6 @@ function flag(name) {
   return null;
 }
 
-const mode = (flag('mode') || '').toLowerCase();
 const country = flag('country');
 const market = flag('market');
 
@@ -341,9 +339,11 @@ async function main(base) {
 
   /* The shape of this build, echoed back so it is on the record and in front of the agent. */
   console.log('\nThis build:\n');
-  line(true, mode === 'demo'
-    ? 'mode DEMO — BUILD every feature the archetype supports; showing the product off is the job'
-    : 'mode MERCHANT — OFFER a feature when the archetype fits, and let them decline');
+  // One tick, then indented continuations -- a tick per line reads as three separate findings.
+  line(true, 'BUILD IN FULL — products, categories, pages, reviews, and every feature the');
+  console.log('      archetype reaches for. All of it is placeholder the merchant then edits.');
+  console.log('      Show them the feature checklist with those boxes already ticked, and');
+  console.log('      never ask an open question about a feature.');
   line(true, `seller in ${country} — legal pages are built from this and from the market below`);
   line(true, market === country
     ? `customers in ${market} (same as the seller)`
@@ -508,21 +508,16 @@ async function main(base) {
   return 0;
 }
 
-const MODES = ['demo', 'merchant'];
 const missingArgs = [];
 if (!rawUrl || !apiKey) missingArgs.push('<site-url> and <api-key>');
-if (!MODES.includes(mode)) missingArgs.push('--mode=demo|merchant');
 if (!country) missingArgs.push('--country=<where the SELLER is>');
 if (!market) missingArgs.push('--market=<where the CUSTOMER is>');
 
 if (missingArgs.length) {
-  console.error('\nusage: node preflight.mjs <site-url> <api-key> --mode=<demo|merchant> --country=<CC> --market=<CC>\n');
+  console.error('\nusage: node preflight.mjs <site-url> <api-key> --country=<CC> --market=<CC>\n');
   console.error('missing:');
   for (const m of missingArgs) console.error(`  • ${m}`);
   console.error('\nNone of these is inferable, which is why the script refuses rather than guessing:');
-  console.error('  --mode     demo BUILDS every feature the archetype supports; merchant OFFERS them.');
-  console.error('             Guess wrong and you either impose features on a merchant who will not');
-  console.error('             operate them, or ship a demo that hides the product.');
   console.error('  --country  where the SELLER is.');
   console.error('  --market   where the CUSTOMER is. Separate on purpose: consumer obligations follow');
   console.error('             the customer, so collapsing the two silently picks the wrong');
