@@ -389,16 +389,62 @@ async function main(base) {
     : 'codbrand-content-builder NOT installed — required to build any page');
 
   if (forbidden.length || missing.length || httpsRefused.length) {
-    console.error('\nSTOP. This key cannot complete a build.');
+    // NAME THE RIGHT CULPRIT. This said "This key cannot complete a build" for every failure kind,
+    // including a pure HTTPS refusal where the key and its scopes are provably fine -- reported from
+    // a live build on 20-09-2026, where it sent someone to re-issue a key that was never the problem.
+    // A wrong diagnosis costs more than none: it gets acted on.
+    const onlyHttps = httpsRefused.length && !forbidden.length && !missing.length;
+    console.error(onlyHttps
+      ? '\nSTOP. This store cannot be built yet — and it is NOT your key.'
+      : '\nSTOP. This key cannot complete a build.');
 
     if (httpsRefused.length) {
       console.error('\nThe store refused these as non-HTTPS (403 cl_api_https_required):\n');
       for (const m of httpsRefused) console.error(`    • ${m}`);
-      console.error('\nThe key is fine and the scopes are fine — the site sits behind a TLS proxy the');
-      console.error('plugin cannot see through. It often refuses only SOME requests, so a retry that');
-      console.error('appears to work has not fixed anything: a build makes hundreds of calls and a');
-      console.error('fraction of them will fail part-way through, leaving half-written pages.');
-      console.error('The site owner resolves it with the `cl_api_is_ssl` filter.');
+      console.error('\nYour key is fine and its scopes are fine. It often refuses only SOME requests,');
+      console.error('so a retry that appears to work has not fixed anything: a build makes hundreds of');
+      console.error('calls and a fraction will fail part-way through, leaving half-written pages.');
+
+      // WHICH of the two causes is it? They go to DIFFERENT PEOPLE, so guessing is worse than asking.
+      // WordPress core's own UNAUTHENTICATED index answers it: `url` is the RAW `siteurl` option,
+      // while `home` is home_url(), whose scheme core rewrites to https whenever is_ssl() is true
+      // (wp-includes/link-template.php). So a store can report `home` as https and still hold a
+      // stored http URL -- exactly the misconfiguration that looks healthy on every node that keeps
+      // the scheme and refuses on the one that does not. `url` is the reliable signal.
+      const origin = base.replace(/\/wp-json\/cl-api\/v1$/, '');
+      let stored = null;
+      try {
+        const probe = await fetch(`${origin}/wp-json/`);
+        if (probe.ok) {
+          const b = await probe.json();
+          stored = { wpAddress: String(b.url || ''), siteAddress: String(b.home || '') };
+        }
+      } catch { /* leave it null and say so, rather than naming a cause we did not establish */ }
+
+      if (stored && !stored.wpAddress.startsWith('https://')) {
+        console.error("\n  CAUSE — the store's own WordPress URL is on http. THE MERCHANT FIXES THIS:\n");
+        console.error(`      WordPress Address (URL) is ${stored.wpAddress}`);
+        console.error('      Settings → General → set it to https://… and Save.');
+        console.error('\n  One setting, correct regardless of this error. Until it changes the plugin');
+        console.error('  cannot tell a real https request from a plain one. The Site Address above it');
+        console.error(`  may already read ${stored.siteAddress} — core rewrites THAT one on the fly, so`);
+        console.error('  it hides the problem rather than showing it. Trust the WordPress Address.');
+      } else if (stored) {
+        console.error('\n  CAUSE — the HOST drops the TLS scheme on some requests. NOT THE MERCHANT:\n');
+        console.error(`      Both WordPress URLs are correct (${stored.wpAddress}).`);
+        console.error('      So the store is configured right and the refusals come from in front of');
+        console.error('      it: a front-end terminating TLS, then handing PHP a request that looks plain.');
+        console.error('\n  This goes to the HOST. If responses carry a node id header (Hostinger sends');
+        console.error('  x-hcdn-request-id), capture it on several failures and several successes — the');
+        console.error('  failures usually all come from one node, which names the fault precisely enough');
+        console.error('  for support to act on.');
+      } else {
+        console.error("\n  Could not read the site's own WordPress URLs to tell the two causes apart.");
+        console.error('  Check Settings → General first: if the WordPress Address is on http that is the');
+        console.error('  cause and the merchant fixes it. If it is https, the host is dropping the scheme.');
+      }
+      console.error('\n  Last resort only, and it trades the check away rather than fixing it: the site');
+      console.error('  owner can force it with the `cl_api_is_ssl` filter.');
     }
 
     if (forbidden.length) {
