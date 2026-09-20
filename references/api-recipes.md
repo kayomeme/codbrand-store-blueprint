@@ -30,7 +30,7 @@ things that fail quietly.**
 | 4 | **`store_settings`**, then **`stores/ensure_pages`**, then palette, fonts, icons | reading direction and the page width are what every design is laid out inside; **everything downstream references `var(--cl-*)`**; and the funnel is not reachable until its pages are wired |
 | 5 | designs, copy, logo | needs the tokens to exist |
 | 6–7 | pages | needs the design, or the merchant judges copy by styling |
-| 8 | menus, nav, homepage | **needs the pages to exist** — and a menu id is not a designed header; that was phase 5 |
+| 8 | menus, nav, the front page (`is_front_page` on `pages`) | **needs the pages to exist** — and a menu id is not a designed header; that was phase 5 |
 | 9 | measure what you built, and diff it against the reference | the only step that can catch a build that is self-consistent and still wrong |
 
 Two of those are hard failures, not preferences: styles written before their tokens point at nothing,
@@ -204,10 +204,24 @@ multi-store install, add and point rather than edit.
 same bytes is safe and free, but iterating on a logo leaves the earlier attempts in the library.
 Never promise the merchant a cleanup the API cannot do.
 
-**Some things have no door.** A contact form is the known one: you can build a Contact page, but it
-lists WhatsApp / phone / email rather than a working form. Say so rather than quietly shipping a page
-that looks like it has a form. If a door you expected is missing, tell the merchant — do not invent a
-workaround that leaves the store in a state nobody can maintain.
+**Some things have no door — but CHECK before you say so.** A contact form is the known one: you can
+build a Contact page, but it lists WhatsApp / phone / email rather than a working form. Say so rather
+than quietly shipping a page that looks like it has a form. If a door you expected really is missing,
+tell the merchant — do not invent a workaround that leaves the store in a state nobody can maintain.
+
+⚠️ **"There is no api door for this" is the most expensive sentence in a handover.** The merchant
+believes it and does it by hand from then on, so a wrong one keeps costing long after the build ends.
+**This file not naming a thing means THIS FILE is incomplete** — it says so at the top — **never that
+the door is absent.** Read the resource's own field list before you concede; every write door
+publishes one. Measured 20-09-2026: a build reported the front page as impossible and sent the
+merchant to wp-admin. `is_front_page` was declared, enum-validated and documented on the `pages` door
+the whole time; the build inferred its absence instead of reading the door.
+
+**The front page is a SITE-WIDE switch, so `"no"` is not a safe default.** `"yes"` on one page takes
+it off whichever page held it — there is only ever one. Sending `"no"` on the page that currently
+holds it hands the domain root back to the blog index: a normal `200`, and the store stops answering
+at its own root. Send the key on the ONE page that should be the front page and omit it everywhere
+else; never send `"no"` as a tidy-up.
 
 ## Idempotency, so a re-run is safe
 
