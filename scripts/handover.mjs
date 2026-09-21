@@ -466,6 +466,9 @@ async function main(base) {
   const icons = await checkIcons(call, R, settingsByType);
   if (icons.skipped) {
     line(false, `${icons.skipped} — icon ids NOT checked, and not passed`);
+    // Counted, not just printed: without this the run still ended "✓ … icons resolve" and exit 0
+    // after saying the icons were never read (a rate-limited build, 20-09-2026).
+    problems.push(`icon ids were NOT checked — ${icons.skipped}. A check that did not run is not a pass: re-run.`);
   } else if (icons.dangling.length) {
     problems.push(
       `${icons.dangling.length} icon id(s) point at an icon that does not exist:\n` +
@@ -493,6 +496,7 @@ async function main(base) {
   const imgs = await checkImages(call, R);
   if (imgs.skipped) {
     line(false, `${imgs.skipped} — images NOT checked, and not passed`);
+    problems.push(`catalogue images were NOT checked — ${imgs.skipped}. A check that did not run is not a pass: re-run.`);
   } else {
     problems.push(...imgs.problems);
     if (!imgs.problems.length) {
@@ -545,6 +549,7 @@ async function main(base) {
   if (unreadable.length) {
     console.log('');
     for (const u of unreadable) line(false, `could not read ${u} — NOT checked, and not passed`);
+    problems.push(`${unreadable.length} design(s) could not be read, so they were NOT checked: ${unreadable.join(', ')}. Re-run.`);
   }
 
   console.log('');
