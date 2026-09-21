@@ -29,7 +29,7 @@
  * neutral grey, and a topbar whose colours were inverted. Every one is a value comparison a machine
  * does perfectly and a reader skims past.
  *
- * TWO THINGS THIS DELIBERATELY REFUSES TO DO:
+ * THREE THINGS THIS DELIBERATELY REFUSES TO DO:
  *
  *   1. Accept a free-text excuse. A row that does not match passes only with a `reason` of a known
  *      KIND carrying evidence — and `within_tolerance` is re-checked numerically here rather than
@@ -37,6 +37,11 @@
  *      is not evidence.
  *   2. Trust two rows measured differently. If `traversal` differs between the specs the comparison
  *      is meaningless, and a meaningless comparison that returns "match" is worse than no check.
+ *   3. Count a size nobody measured. Every spec says how it was taken — `"measured_with": "browser"`
+ *      or `"none"` — and without a browser every row that needs a rendered page (sizes, gutters,
+ *      padding, colours, font metrics) is UNMEASURABLE, whatever number it carries. Measured
+ *      21-09-2026: a build with no browser filled `header.height` from its own `height:221px` setting,
+ *      this script counted 221 → 221 as a match, and the header on the page was about 103px tall.
  *
  * No dependencies — same rule as every script here: a merchant must never install a toolchain to
  * find out their store does not match what they asked for.
@@ -144,6 +149,14 @@ function load(path, label) {
       console.log(`  ✗ ${label}: no "properties" array — see references/reference-extraction.md`);
       return null;
     }
+    const how = spec.measured_with;
+    if (how !== 'browser' && how !== 'none') {
+      console.log(`  ✗ ${label}: ${how === undefined ? 'no "measured_with"' : `"measured_with": ${JSON.stringify(how)} is neither "browser" nor "none"`}.`);
+      console.log('      Say how this spec was taken: "browser" when every value was read off a rendered page,');
+      console.log('      "none" when there was no browser. Without it nothing tells a measured size from one');
+      console.log('      copied out of a setting. See references/reference-extraction.md → "The spec shape".');
+      return null;
+    }
     return spec;
   } catch (e) {
     console.log(`  ✗ ${label}: not valid JSON — ${e.message}`);
@@ -152,6 +165,49 @@ function load(path, label) {
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/*
+ * Which rows need a RENDERED page, and which a page's source can answer.
+ *
+ * Static — countable or listable without the cascade: presence (a boolean), an ordered list (labels,
+ * icons, links per column), and a count or a kind, named by the id's last word. Everything else
+ * needs the cascade resolved — sizes, gutters, padding, colours, font sizes and weights, transforms,
+ * alignment, borders, radii, ratios — and so does any row carrying a `unit`, a `traversal`, a
+ * `pair_with` or a colour, whatever its id says. When in doubt a row counts as needing a render: a
+ * static row wrongly marked unmeasurable costs a line in the report, a rendered row wrongly passed
+ * costs the store.
+ */
+const STATIC_WORDS = new Set(['present', 'count', 'items', 'columns', 'links', 'kind']);
+
+function needsRender(row) {
+  if (row.unit || row.traversal || row.pair_with) return true;
+  const v = row.value;
+  if (typeof v === 'boolean' || Array.isArray(v)) return false;
+  if (typeof v === 'string' && parseColour(v)) return true;
+  const word = String(row.id ?? '').split('.').pop().split('_').pop();
+  return !STATIC_WORDS.has(word);
+}
+
+/**
+ * A spec taken without a browser: every row that needs a render becomes UNMEASURABLE — its value set
+ * aside, its reason replaced — so it is treated exactly like a row the agent marked unmeasurable
+ * itself: reported, never passed. A null value is left alone, because null is also how a spec says
+ * "the reference has no such surface", which a page's source CAN show. Returns how many rows changed.
+ */
+function unmeasuredWithoutBrowser(spec, label) {
+  if (spec.measured_with !== 'none') return 0;
+  let n = 0;
+  for (const row of spec.properties) {
+    if (row.value === null || row.value === undefined || !needsRender(row)) continue;
+    row.written_value = row.value;
+    row.value = null;
+    row.reason = { kind: 'unmeasurable', evidence: `the ${label} spec was taken with "measured_with": "none"` };
+    n++;
+  }
+  return n;
+}
+
+const isUnmeasurable = (row) => row?.reason?.kind === 'unmeasurable';
 
 /**
  * How far apart are two colours, as a plain RGB distance?
@@ -216,15 +272,22 @@ function foldReferences(specs) {
     if (n < specs.length) { dropped.push({ id, seen: n }); continue; }
     const rows = specs.map((spec) => spec.properties.find((p) => p.id === id));
     const values = rows.map((r) => r.value);
-    const base = { id, traversal: rows[0].traversal, pair_with: rows[0].pair_with, reason: rows.find((r) => r.reason)?.reason };
+    /* An excuse carries over to the band; `unmeasurable` does not. One reference that could not look
+     * shrinks the sample (below) — it does not make a band two other references measured unmeasurable. */
+    const base = { id, traversal: rows[0].traversal, pair_with: rows[0].pair_with,
+                   reason: rows.find((r) => r.reason && !isUnmeasurable(r))?.reason };
 
     /* An UNMEASURABLE reference does not get a vote. `null` means "could not look", and folding it
      * into an allowed set turns "we did not measure this on two of three sites" into "null is a
      * legitimate value your build may have" - which is how a non-answer becomes a constraint.
-     * It reduces the SAMPLE instead; below two real values there is no band to speak of. */
+     * It reduces the SAMPLE instead; below two real values there is no band to speak of — and when
+     * that is BECAUSE a reference could not look, the row is unresolved, not merely dropped: a band
+     * of references measured without a browser must not quietly shrink to its static rows. */
     const real = values.filter((v) => v !== null && v !== undefined);
     if (real.length < 2) {
-      dropped.push({ id, seen: real.length, why: 'measurable on fewer than two references' });
+      const unmeasured = rows.filter(isUnmeasurable).length;
+      dropped.push({ id, seen: real.length, unmeasured,
+                     why: unmeasured ? `unmeasurable on ${unmeasured} of ${specs.length} references` : 'measurable on fewer than two references' });
       continue;
     }
 
@@ -398,13 +461,25 @@ function main() {
     return;
   }
 
+  /* A spec taken without a browser turns its rendered rows into unmeasurable ones BEFORE anything is
+   * folded or compared, so every rule below treats them exactly as it treats a row marked by hand. */
+  const unmeasured = [
+    ...loaded.map((spec, i) => [loaded.length > 1 ? `reference ${i + 1}` : 'reference', spec]),
+    ['live', live],
+  ].map(([label, spec]) => [label, unmeasuredWithoutBrowser(spec, label)]).filter(([, n]) => n);
+  for (const [label, n] of unmeasured) {
+    console.log(`  ! ${label}: measured without a browser \u2014 ${n} row(s) that need a rendered page (sizes, gutters,`);
+    console.log('    padding, colours, font metrics) are UNMEASURABLE, whatever number they carry. Reported, never passed.');
+  }
+
   const ref = loaded.length === 1 ? loaded[0] : foldReferences(loaded);
 
-  if (ref.dropped?.length) {
-    console.log(`  ! ${ref.dropped.length} propert(ies) are not present in every reference, so no band`);
+  const structural = (ref.dropped ?? []).filter((d) => !d.unmeasured);
+  if (structural.length) {
+    console.log(`  ! ${structural.length} propert(ies) are not present in every reference, so no band`);
     console.log('    could be derived and they are NOT matched. That the references disagree here is');
     console.log('    itself worth knowing:');
-    for (const d of ref.dropped.slice(0, 10)) {
+    for (const d of structural.slice(0, 10)) {
       console.log(`      \u00b7 ${d.id} (in ${d.seen} of ${loaded.length})${d.why ? ' \u2014 ' + d.why : ''}`);
     }
     console.log('');
@@ -442,11 +517,29 @@ function main() {
   const problems = [];
   let matched = 0;
   let excused = 0;
+  let unmeasurable = 0;
+
+  /* A band row the references could not measure is unresolved, never silently dropped. */
+  for (const d of (ref.dropped ?? []).filter((x) => x.unmeasured)) {
+    unmeasurable++;
+    problems.push([d.id, `${d.why}, so no band could be derived — unmeasurable rows are reported, never passed`]);
+  }
 
   for (const r of ref.properties) {
     const l = liveById.get(r.id);
     if (!l) {
       problems.push([r.id, 'not measured on the live store — the checklist must be run identically on both']);
+      continue;
+    }
+    /* UNMEASURABLE NEVER COUNTS AS A MATCH, on either side. Before this check a row unmeasurable on
+     * BOTH specs compared null with null and was counted as a match — the exact conversion of "I do
+     * not know" into "it matches" that reference-extraction.md forbids. */
+    const blind = [[l, 'live'], [r, 'reference']].find(([row]) => isUnmeasurable(row));
+    if (blind) {
+      const [row, side] = blind;
+      unmeasurable++;
+      const written = row.written_value !== undefined ? ` (its ${JSON.stringify(row.written_value)} was written, not measured)` : '';
+      problems.push([r.id, `unmeasurable on the ${side} spec${written} — reported, never passed. Measure it on a rendered page, or tell the merchant it went unchecked`]);
       continue;
     }
     if (r.traversal && l.traversal && r.traversal !== l.traversal) {
@@ -479,7 +572,8 @@ function main() {
   const extra = live.properties.filter((p) => !ref.properties.some((r) => r.id === p.id));
   for (const e of extra) console.log(`  · ${e.id.padEnd(30)} present in your build, absent from the reference`);
 
-  console.log(`\n  ${matched} match · ${excused} excused with evidence · ${problems.length} unresolved\n`);
+  console.log(`\n  ${matched} match · ${excused} excused with evidence · ${problems.length} unresolved` +
+    `${unmeasurable ? ` (${unmeasurable} of them unmeasurable)` : ''}\n`);
 
   if (problems.length) {
     console.log('UNRESOLVED — each needs a real fix or a reason with evidence:\n');

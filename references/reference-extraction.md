@@ -6,17 +6,26 @@ A reference site is a **specification**, not a mood board. Treated as a mood boa
 that is "in the spirit of" the reference and wrong in every particular, and the merchant finds each
 particular for you, one message at a time.
 
-## This document is executed TWICE
+## This document is executed TWICE, at TWO widths
 
 That is the whole design. The same checklist, run against two different pages:
 
 | pass | when | output |
 |---|---|---|
-| **1 — reference** | before you configure anything | `reference-spec.json` |
-| **2 — live** | after the build, before you say it is done | `live-spec.json` |
+| **1 — reference** | before you configure anything | `reference-1440.json` · `reference-390.json` |
+| **2 — live** | after the build, before you say it is done | `live-1440.json` · `live-390.json` |
 
 `scripts/match.mjs` then diffs the two. **A checklist applied to only one side cannot diff anything** —
 if you extract the reference and never measure what you built, you have a nicely-documented wish.
+
+**Both passes run at 1440×900 AND at 390×844, one spec file per width**, and `match.mjs` runs once per
+width: `--reference reference-1440.json --live live-1440.json`, then the same for 390. It refuses to
+compare specs taken at different widths, so the two cannot be mixed by accident. Every dimensional row
+is a function of the width it was measured at, and a COD store's customers are mostly on a phone.
+
+*Measured 21-09-2026: a build matched at 1440 only. Both defects the merchant then reported on a phone
+— a footer band flush against its text, a product grid with crushed buttons — sat outside anything
+the match had measured.*
 
 Measuring the reference first is not optional either: decide the palette, fonts and layout *from*
 measured values, not from an impression you then hope the measurement confirms.
@@ -67,14 +76,15 @@ transparent over a hero **image**, so its backdrop is not a colour at all.
 
 `null` is honest and it costs nothing: an `unmeasurable` row never counts as a match.
 
-## When the input is a NICHE, this runs FOUR times, not twice
+## When the input is a NICHE, this runs FOUR times per width, not twice
 
 A merchant who names a site gives you one reference. A merchant who names only a niche used to give
 you nothing measurable at all — an archetype produced adjectives, adjectives cannot fail a check, and
 so a niche build had no match phase and nothing it produced could be verified against anything.
 
 **So a niche build gets references too: the three best stores in that niche.** Measure each one with
-this same checklist, then measure what you built. Four runs, four specs:
+this same checklist, then measure what you built. Four specs at each width — the diagram below is one
+width; run it again at the other:
 
 ```
 reference-a.json   reference-b.json   reference-c.json        live-spec.json
@@ -99,9 +109,9 @@ range. Averaging invents a fourth store that none of them is, and then reports a
 exactly like one of the three as a mismatch. A row inside the band is a row a real store in that
 niche actually shipped.
 
-⚠️ **Measure all three at ONE viewport.** Every dimensional row is a function of the width it was
-measured at, so a band built from mixed widths is noise — `match.mjs` refuses it outright, the same
-way it refuses a reference and a live store measured at different widths.
+⚠️ **Measure all three at the SAME viewport, once per width.** Every dimensional row is a function of
+the width it was measured at, so a band built from mixed widths is noise — `match.mjs` refuses it
+outright, the same way it refuses a reference and a live store measured at different widths.
 
 ⚠️ **Style only, never content.** Measure colour, type, spacing and structure. Never lift copy,
 photography or a brand mark from any of the three. This is the standing rule from the first build
@@ -119,7 +129,8 @@ any work starts, the same way it checks for `codbrand-content-builder`.
 **Without a browser, degrade explicitly — never silently:**
 
 - Measure what static HTML gives you: item counts, column order, link labels, presence/absence.
-- Mark every computed-style row `"unmeasurable"`.
+- Mark every computed-style row `"unmeasurable"`, and write `"measured_with": "none"` on the spec —
+  `match.mjs` then treats every computed-style row as unmeasurable even where you slipped.
 - **An `unmeasurable` row NEVER counts as a match.** It is reported, and the merchant is told which
   parts of their reference you could not check. A gate that passes because it could not look is worse
   than no gate — it converts "I don't know" into "it matches".
@@ -127,7 +138,8 @@ any work starts, the same way it checks for `codbrand-content-builder`.
   `header.height`, `logo_width` and every gutter. Your own setting records what you asked for, and a
   layout or a card design can override it on the page. Without a browser, mark those rows
   `unmeasurable` as well, **even when a setting states the exact number**. Those are the rows most
-  likely to be wrong.
+  likely to be wrong. `match.mjs` now enforces it: a spec with `"measured_with": "none"` has every
+  such row treated as unmeasurable, whatever you wrote in it — see "The spec shape".
 
   *Measured 21-09-2026: a build with no browser marked the topbar and footer heights `unmeasurable`,
   but filled `header.height` from its own `height:221px` setting. `match.mjs` counted 221 → 221 as a
@@ -214,13 +226,14 @@ point, you should. Exit 0 means *the rows you wrote agree*, never *the store mat
 
 ## The spec shape
 
-One file per pass, identical shape, so `match.mjs` can diff them positionally by `id`.
+One file per pass and per width, identical shape, so `match.mjs` can diff them positionally by `id`.
 
 ```jsonc
 {
   "source": "https://example.com/",       // or the built store's URL on pass 2
   "captured_at": "2026-09-06",
-  "viewport": { "width": 1440, "height": 900 },
+  "viewport": { "width": 1440, "height": 900 },   // or 390 × 844 — one file per width
+  "measured_with": "browser",             // REQUIRED: "browser" or "none"
   "properties": [
     { "id": "topbar.height",     "value": 36,                 "unit": "px", "tolerance": 4 },
     { "id": "topbar.background", "value": "rgb(0,0,0)",       "traversal": "paint-up" },
@@ -234,6 +247,16 @@ One file per pass, identical shape, so `match.mjs` can diff them positionally by
 }
 ```
 
+- **`measured_with`** is REQUIRED on every spec, reference and live alike, and `match.mjs` refuses a
+  spec without it. `"browser"` means every value was read off a rendered page. `"none"` means there
+  was no browser, and then every row that needs a rendered page is treated exactly like
+  `unmeasurable` — reported, never passed — whatever number you wrote into it. Only **static** rows
+  can match without a browser: presence (a boolean), an ordered list (labels, icons, links per
+  column), and a count or a kind (an id ending in `present`, `count`, `items`, `columns`, `links` or
+  `kind`). Everything else is computed style — sizes, gutters, padding, colours, font sizes and
+  weights, transforms, alignment, borders, radii, ratios — and so is any row with a `unit`, a
+  `traversal`, a `pair_with` or a colour value. Write the field honestly: it is the only thing that
+  tells a number copied out of a setting from a number measured on the page.
 - **`tolerance`** is numeric and optional; without one, values must be equal. Put it on properties
   where exactness is meaningless (a 2px height difference), never on ones where it hides a defect.
 - **`traversal`** records HOW you measured, so the second pass repeats it. `match.mjs` refuses to
@@ -252,7 +275,7 @@ machine-checkable evidence:
 | `needs_a_preset` | reachable, but through a shared preset, not this design's settings | must name **`settings_schema`** (absent there) and the property class |
 | `within_tolerance` | numerically close enough | checked against the row's own `tolerance` — not asserted |
 | `merchant_override` | the merchant asked for something different | must cite the decision, e.g. **`decisions.palette`** |
-| `unmeasurable` | no browser; could not read it | **does not pass** — reported only |
+| `unmeasurable` | no browser; could not read it | **does not pass** — reported only, on either spec, even when both sides say it |
 
 **Free text alone fails**, and `match.mjs` enforces it: evidence under 20 characters is rejected, and
 evidence that never mentions the anchor above is rejected — nothing in it shows you looked.

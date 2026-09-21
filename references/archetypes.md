@@ -165,7 +165,36 @@ the reach-for table above names for three archetypes:
 **Order the list by what the shopper meets first** — reviews and options before back-in-stock
 alerts — not by resource name. And keep it FLAT: nothing hidden behind a group.
 
+### What switches each feature, and applying the checklist
 
+Showing the checklist changes nothing on the store. **Apply it in phase 5**: switch every feature the
+merchant left ticked ON and every unticked one OFF. Then, in 5b, seed the rows each ticked feature
+needs, because most of them render nothing without rows.
+
+| checklist row | switched by (design type → setting) | needs behind it |
+|---|---|---|
+| Customer reviews | `product` → `reviews_is_active` | approved reviews (`reviews`) |
+| Quantity discounts | `product` → `qty_offers_is_active` | an active offer with at least two tiers (`qty_offers`) |
+| Product options | `product` → `variations_is_active`, AND the store row's own `variations_is_active` (`stores`); either one at `no` hides every option | options on the products (`product/variations`) |
+| You may also like | `product` → `p_upsell_is_active` | pairings, product by product (`product/upsells`) |
+| Quick view | `plist1` → `quickview_bt_is_active`. For OFF, also `product` → `p_upsell_quickview_bt_is_active` and `thankyou` → `quickview_bt_is_active` | — |
+| Stories | `product` → `stories_is_active` (ships `no`) | active stories (`stories`) |
+| Discount codes | `cart` → `cart_coupon_is_active` (ships `no`); the same box also shows on checkout | active codes (`coupons`). The box shows with none, and no code typed into it can work |
+| Back-in-stock alerts | `product` → `stock_waitlist_is_active` | — |
+| Ad tracking | no design switch | an active pixel on the store's tracking design (`tracking/*`) |
+| Countdown timer | `product` → `p_countdown_is_active` (ships **`yes`**). For OFF, also `p_upsell_countdown_is_active`, `sticky_button_countdown_display` (`hide`), `thankyou` → `upsell_countdown_is_active`, and any topbar message with a countdown | shows only on a product whose sale has a start and an end date. Never invent a sale to make it show |
+| Search | `search` → `search_is_active`, plus at least one entry point that is not `none`: `header_search_render`, `inline_search_bar_header_position`, `inline_search_bar_footer_position`, `inline_search_bar_results_page_position`, `floating_button_position` | — |
+
+**The countdown ships switched ON**, so a checklist that says OFF has to switch it off.
+
+*Measured 21-09-2026: a build showed the merchant the countdown unticked, and shipped it ON at the
+product design's default. For a day it also showed product options and upsells ticked ON with no rows
+behind either.*
+
+Record the result in the blueprint (`blueprint-format.md` → "features"). `handover.mjs` reads it back
+and fails when the store disagrees, and **it carries the same map**, so change the two together. If a
+setting in this table is missing from an install, that install has moved on: handover says so, check
+that feature by hand, and correct the table.
 
 ## When the merchant named a NICHE and not a site — find three exemplars
 

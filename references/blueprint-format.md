@@ -119,6 +119,14 @@ is the same class of mistake as asking a question whose answer is already on the
 An `"off"` here is a merchant's decision and outranks the archetype's default on every later run.
 They can change it back at any time by saying so.
 
+**`handover.mjs` reads this back**, from the applied blueprint (or the newest draft when none is
+applied), and fails when the store disagrees. Write one key per checklist row: `reviews`,
+`qty_offers`, `product_variations`, `product_upsells`, `quickview`, `stories`, `coupons`,
+`stock_waitlist`, `tracking`, `countdown`, `search`. Start each value with `on` or `off`; a short note
+may follow (`"on — sizes on every product"`). A key it does not know, or a value that is neither, is
+reported as not reconciled rather than checked. The settings behind each row are in `archetypes.md` →
+"What switches each feature".
+
 ### `language` carries a script, and it is not decoration
 
 ```jsonc
@@ -154,7 +162,7 @@ more than one store, **add new tokens and point at them** — never edit one ano
 
 ## Worked example
 
-Trimmed to two decisions; a real one carries all thirteen.
+Trimmed to three decisions; a real one carries all fourteen.
 
 ```jsonc
 {

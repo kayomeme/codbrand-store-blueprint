@@ -117,27 +117,44 @@ permission grid and saves; the key does not need reissuing.
 
 ## Fonts
 
-**A fresh install has exactly TWO fonts installed** — Inter and Cormorant Garamond. Read what is
-actually there: `GET /design_controls/font_manager`. Never assume a family is present.
+**A fresh install ships two font rows**: `font1`, Inter, which is active and the default; and `font2`,
+a system serif (Georgia), which is switched off. An install seeded by an older version may carry
+different families in those two rows. Read what is actually there with
+`GET /design_controls/font_manager`, and never assume a family is present.
 
 ⚠️ An earlier version of this page said "46 families ship — 17 Arabic, 29 Latin", which sent readers
 hunting for an Arabic list that is not installed. The 46 are real but they are a **picker list in the
 admin UI** (17 Arabic + 29 Latin), not rows in the font table. Anything you want, you add.
 
-### How the font system works — three moving parts
+### How the font system works — and how little the default reaches
 
-Adding a font is cheap and non-destructive, and the system is built for several coexisting:
+Every font row publishes a CSS variable named from its `name`: `--cl-font1`, `--cl-font101`, and so
+on. `apply` adds a font as well as updating one, and adding never disturbs an existing row.
 
-1. **Add a font** (`apply` creates as well as updates). Every row publishes a CSS variable named from
-   its `name` column — `--cl-font1`, `--cl-font101`, and so on. Adding never disturbs an existing one.
-2. **Mark ONE `is_default`.** That font is compiled into a `:root, body { font-family: … }` rule for
-   the storefront. This is how you set the face for the whole site, and it is the step most likely to
-   be missed — without it you have installed a font nothing uses.
-3. **Reference any other font by its variable** where you want a second face — a heading, a price, a
-   badge — by writing `font-family: var(--cl-font101)` into that design's style value.
+**The default font is compiled into a single rule, `:root, body { font-family: … }`, and almost no
+storefront text uses it.** Nearly every piece of text is styled by a design preset, and presets set
+their own font: 26 of the 35 shipped presets write `font-family: var(--cl-font1)`, and every button,
+badge and icon-button preset, including any you create, has `font-family: var(--cl-font1)` in its base
+styles. No setting changes that base. A preset's own declaration beats the inherited default, so a new
+default reaches body text and little else.
 
-So: **add freely, default once, reference the rest by id.** Verified on a live store — the site
-default reached 887 elements, a second font referenced by id reached 30, and nothing fell back.
+⚠️ *An earlier version of this page said that marking a font `is_default` "is how you set the face for
+the whole site". On a real store that was false. Measured 21-09-2026: a build made an Arabic font the
+default and left `font1` as Inter, and every preset-styled button, badge and title stayed Inter until
+the build edited all 26 presets by hand.*
+
+**So put the brand's face INTO `font1`, rather than beside it.** `font1` is a system row, so it cannot
+be deleted, but its family can be re-pointed like any other: `apply` with `"name": "font1"` and the
+new family (the door's own field list says what else a Google font needs). Every preset that uses
+`var(--cl-font1)` follows, and so does every button base. Keep `font1` the default as well, so `body`
+agrees with the presets.
+
+- **The body face goes in `font1`.** A second face, for headings or a price, is a new font that you
+  reference by its variable, `font-family: var(--cl-font101)`, in the typography presets that should
+  use it.
+- **Fonts are global, like the palette.** On an install with more than one store, re-pointing `font1`
+  restyles every store. There, add the new face as its own font, and give each preset you use its own
+  copy with `font-family` in `css_default`, which beats the base.
 
 Pick **two**: a heading face and a body face. Map from the archetype:
 
@@ -150,10 +167,12 @@ Pick **two**: a heading face and a body face. Map from the archetype:
 | Sage | clean geometric sans (Montserrat, Inter) | same family |
 | Magician | bold heavy sans (Poppins, Montserrat 700+) | plain sans |
 
-**For an Arabic-script store, add an Arabic family and make it the default** — Tajawal, Cairo, Amiri,
-Almarai, Noto Sans Arabic, Reem Kufi and El Messiri are all in the picker list. Neither installed
-font has Arabic glyphs, so skipping this leaves the browser substituting something arbitrary for
-every word on the site. Latin-script Darija uses a Latin family normally.
+**For an Arabic-script store, re-point `font1` to an Arabic family and keep it the default.** Tajawal,
+Cairo, Amiri, Almarai, Noto Sans Arabic, Reem Kufi and El Messiri are all in the picker list. Neither
+shipped font has Arabic glyphs, so skipping this leaves the browser substituting something arbitrary
+for every button, badge and title on the site. Also remove the negative `letter-spacing` that two
+shipped title presets carry (`-0.02em` and `-0.01em`): negative tracking pulls Arabic letters out of
+their joins. Latin-script Darija uses a Latin family normally.
 
 ## Density
 

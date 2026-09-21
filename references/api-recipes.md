@@ -135,6 +135,14 @@ stay English, here they are"* is true and actionable. *"I cannot fully translate
 is neither — it describes a store whose copy IS in the merchant's language, with a short listable
 tail, and the merchant deserves the list rather than the hedge.
 
+**On an Arabic-, Hebrew- or Thaana-script store, `handover.mjs` lists every `translatable` setting
+still in Latin letters, and fails.** A Latin-script store gets no such check, because the schema does
+not say what each key shipped with, so an English default cannot be told from French copy. There,
+compare the keys yourself.
+
+*Measured 21-09-2026: a build reported an Arabic store's copy as fully translated. Seventeen
+translatable settings were still English, including "Add to cart" on the main buy button.*
+
 ⚠️ **The `langue_code` translation pack is WordPress's, not ours.** Setting `ar` installs the
 Arabic pack, which translates core and the theme. This plugin ships `codlfw.pot` at **0 bytes**
 and no `.mo` or `.po` in any language, so no pack ever reaches the 57 above. If that changes and
@@ -304,6 +312,31 @@ back correctly, and the listing still looks wrong — so it survives any check m
 The only thing that catches it is opening the listing and looking at it, which is why
 "Verify at the end, in the browser" exists.
 
+### How many product columns a phone takes
+
+At 390px, two columns give each card about (390 − 2 × phone gutter − grid gap) ÷ 2, which is about
+155px at the shipped 24px gutters and 32px gap. The card's buttons share that width. Once quick view
+is switched on, add to cart and quick view sit side by side in the listing's default `inline` buttons
+layout, each gets roughly 75px, and a two-word label wraps onto two or three lines.
+
+*Measured 21-09-2026, at 390px with 2 columns: the add-to-cart button was 78px wide, and its Arabic
+label "زيد بسرعة" split in the middle of a word. The plugin stopped the mid-word split in 1.2.766, but
+a 78px button still crushes its label.*
+
+**Use two columns on a phone only when both of these hold:**
+
+1. **Each card carries at most one text button.** Make the second one icon-only (its text is just
+   `@icon`), switch it off, or stack the buttons: the listing's `stacked` buttons layout gives each
+   one the full card width.
+2. **The longest button label fits on one line inside the card**, in the store's language, after you
+   have written the copy. Translation changes a label's length, so check it after the copy is written.
+
+Otherwise use one column. The listing design's `mobile_columns` setting holds it (1 or 2). A
+`cl/products-listing` block on a page overrides it with its own `mobileColumns`, and `inherit` follows
+the design, so set the page's blocks as well, or leave them on `inherit`. Read the design's
+`settings_schema` for the current buttons-layout values rather than trusting this paragraph. Then look
+at the grid at 390px in the phase-10 browser pass.
+
 `codbrand-content-builder` is required, not optional, and `preflight.mjs` checks it is installed
 before any work begins. If it is missing, say so and stop — writing the markup yourself produces a
 visibly thinner store, which is the failure this arrangement exists to prevent.
@@ -311,6 +344,41 @@ visibly thinner store, which is the failure this arrangement exists to prevent.
 **The door takes any string.** `content` is stored byte-verbatim — nothing is sanitised, escaped or
 reformatted, and malformed markup returns `200` exactly like good markup does. Nothing downstream
 catches a mistake, which is why the renderer's validators are the only real check.
+
+## Search titles and descriptions — phase 7b
+
+Every page you built and every product needs its own search title and description. Without one, the
+plugin takes the description from the page itself: its excerpt, or else its body as plain text, cut
+off at 300 characters. On a banded page that is a run of headings and numbered steps that stops
+mid-sentence, and it is what a shopper reads under the link in a search result.
+
+*Measured 21-09-2026: a delivery page served its own numbered steps as its search description, cut
+off in the middle of the list.*
+
+The doors are per item: `pages/{id}/seo`, `products/{id}/seo` and `posts/{id}/seo`. Read
+`GET /docs/seo_overrides` for what they take, and `GET /docs/seo_global_settings` for the seo design.
+The docs cannot tell you the following:
+
+- **Write both in the store's language**, like the rest of the copy. The title names the page and the
+  brand. The description is one plain sentence for someone deciding whether to click: say what the
+  page answers, rather than repeating its first paragraph. Send plain text only, because markup in a
+  meta description is escaped into noise.
+- **Products take the same two, plus their condition.** Condition is a fact about the merchant's
+  goods, so confirm it with them rather than assume it. Once they confirm, set it once as the seo
+  design's `product_condition_default` instead of product by product. Until someone decides, empty is
+  the correct value, because it states nothing.
+- **Leave `noindex` alone** on everything you built. It removes far more than the robots tag (the doc
+  says what), and a small store has nothing to hide from search.
+- **Check the store's `country_code`** on `stores`. Until it is set, product pages give search engines
+  and link previews no price at all, whatever the seo design says.
+- **A shared link to a page with no featured image of its own previews with the store's logo**, and
+  with no picture at all when the store has no logo. Check the `pages` door's own field list: if it
+  takes no featured image, that fallback applies to every page you build.
+- **The seo design is listed by `GET section_manager/global_settings`** (type `seo`). Read it before
+  you assume any of its switches.
+- **Verify by reading the page's HTML**: the `<title>` and `<meta name="description">` tags. None of
+  this shows on the page itself, so a screenshot proves nothing. A fetch is enough, and needs no
+  browser.
 
 ## The store ships with English demo copy that makes PROMISES
 
@@ -465,6 +533,9 @@ on every surface that uses it. If it is not the header's alone, create one for t
 text designs (`main_nav_items_text_preset`, `end_menu_items_text_preset`). It adds `!important` to
 every declaration, so the stuck bar's own background and text colour could no longer win.
 
+`handover.mjs` fails a stacked header whose card design has no top and bottom padding on desktop or on
+phones, and a sticky header whose bar is not opaque once it sticks.
+
 *Added 21-09-2026: a build set `height:221px` on a stacked header whose card design had 0px vertical
 padding. The height did nothing, the style door refused padding, and the header shipped cramped.*
 
@@ -483,8 +554,12 @@ button look like a buy button; does the page hold together on a phone.
 node scripts/handover.mjs <site-url> <api-key>
 ```
 
-It reads the store back and exits 1 on the two failures that leave no visible trace: the logo
-half-state, and any element switched on with nothing in it. Then look at these four, every time:
+It reads the store back and exits 1 on the failures that leave no visible trace: the logo half-state,
+an element switched on with nothing in it, a dangling icon, thin or inconsistent product photography,
+a stacked header with no vertical padding, a stuck header that is not opaque, a coloured band with no
+side padding, Latin-letter copy on an Arabic-, Hebrew- or Thaana-script store, and a feature checklist
+the store disagrees with. A check it could not run is a failure too, never a pass. Then look at these
+four, every time:
 
 | artefact | what you are actually checking |
 |---|---|
@@ -501,10 +576,12 @@ not — that sentence was already here when a build shipped an undesigned topbar
 Looking is necessary and not sufficient. A store can look perfectly good and be nothing like the site
 the merchant pointed at, and *they* will find every difference if you do not.
 
-Measure the built store with the **same checklist** you used on the reference, then diff:
+Measure the built store with the **same checklist** you used on the reference, at both widths, then
+diff once per width:
 
 ```
-node scripts/match.mjs --reference reference-spec.json --live live-spec.json
+node scripts/match.mjs --reference reference-1440.json --live live-1440.json
+node scripts/match.mjs --reference reference-390.json  --live live-390.json
 ```
 
 Exit 0 means every row matches or carries evidence. Exit 1 means it does not, and the output names
@@ -586,7 +663,8 @@ for page blocks.
 
 Set the padding for **both** breakpoints: `css_default` for desktop and `css_mobile` for phones.
 `css_mobile` wins on phones for every property it declares, so after you change padding in one, read
-the other.
+the other. `handover.mjs` fails any design's card design that paints a background the page does not
+have and sets no side padding at either breakpoint.
 
 *Added 21-09-2026: a build gave its footer band `padding:56px 15px 40px 15px` on desktop but left
 `css_mobile` at `padding:40px 0px 28px 0px`. The desktop footer looked right, and on phones the text

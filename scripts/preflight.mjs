@@ -195,9 +195,20 @@ async function censusDesignSystems(call, resources) {
   let icons = null;
 
   for (const [label, slug, fallback] of systems) {
-    const res = await call(`${pathFor(slug, fallback, resources)}?per_page=200`);
-    if (res.status !== 200) { line(false, `${label.padEnd(9)} could not read (HTTP ${res.status})`); continue; }
-    const rows = Array.isArray(res.body) ? res.body : (res.body?.items ?? res.body?.data ?? []);
+    // EVERY page, not one call. The api clamps per_page to 100 without an error, so one read of a
+    // bigger library listed only part of it, and an icon name missing from the list below is a name
+    // a build would then re-create. handover.mjs had the same fault (21-09-2026).
+    const path = pathFor(slug, fallback, resources);
+    const rows = [];
+    let failedStatus = 0;
+    for (let page = 1; page <= 50; page++) {
+      const res = await call(`${path}?per_page=100&page=${page}&order=ASC`);
+      if (res.status !== 200) { failedStatus = res.status; break; }
+      const batch = Array.isArray(res.body) ? res.body : (res.body?.items ?? res.body?.data ?? []);
+      rows.push(...batch);
+      if (batch.length < 100) break;
+    }
+    if (failedStatus) { line(false, `${label.padEnd(9)} could not read (HTTP ${failedStatus})`); continue; }
     line(true, `${label.padEnd(9)} ${rows.length}`);
     if (label === 'icons') icons = rows;
   }
