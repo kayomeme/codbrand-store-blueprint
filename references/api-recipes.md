@@ -524,6 +524,11 @@ there changes with `main_header_layout`:
   only from the top and bottom padding of the header's card design (`main_header_container_preset`),
   set in that preset's `css_default`, plus `css_mobile` for phones. A card design with 0px vertical
   padding renders a cramped header, whatever height you write.
+- **A one-row layout with NO `height`** sizes to its content exactly like `stacked`, so its only vertical
+  space is again the card design's padding. The shipped `height:60px` has room; removing it without
+  padding the card design gives the same cramped bar. A height that is not a real length (`auto`, `0`,
+  a bare `60`) is worse: the plugin still counts it as set and zeroes the card design's padding, so the
+  bar gets none at all. Use a real length, or no height.
 
 The header's style door refuses `padding` on purpose, because padding belongs to the card design.
 Check the preset's `used_count` before you edit it: a card design can be shared, and new padding lands
@@ -533,8 +538,9 @@ on every surface that uses it. If it is not the header's alone, create one for t
 text designs (`main_nav_items_text_preset`, `end_menu_items_text_preset`). It adds `!important` to
 every declaration, so the stuck bar's own background and text colour could no longer win.
 
-`handover.mjs` fails a stacked header whose card design has no top and bottom padding on desktop or on
-phones, and a sticky header whose bar is not opaque once it sticks.
+`handover.mjs` fails any header that sizes to its content (`stacked`, no height, or a height that is not
+a real length) without top and bottom padding on desktop or on phones, and a sticky header whose bar is
+not opaque once it sticks.
 
 *Added 21-09-2026: a build set `height:221px` on a stacked header whose card design had 0px vertical
 padding. The height did nothing, the style door refused padding, and the header shipped cramped.*
@@ -556,7 +562,7 @@ node scripts/handover.mjs <site-url> <api-key>
 
 It reads the store back and exits 1 on the failures that leave no visible trace: the logo half-state,
 an element switched on with nothing in it, a dangling icon, thin or inconsistent product photography,
-a stacked header with no vertical padding, a stuck header that is not opaque, a coloured band with no
+a header that sizes to its content with no vertical padding, a stuck header that is not opaque, a coloured band with no
 side padding, Latin-letter copy on an Arabic-, Hebrew- or Thaana-script store, and a feature checklist
 the store disagrees with. A check it could not run is a failure too, never a pass. Then look at these
 four, every time:

@@ -37,10 +37,12 @@
  *      aspect ratios is, in this skill's own words, "the most visible defect a build can ship, and no
  *      status code reveals it".
  *
- *   5. THE CRAMPED STACKED HEADER. The `stacked` layout ignores `height` and sizes the bar to its two
- *      rows, so the header's card design is its only source of vertical space. With 0 vertical padding
- *      the nav row touches whatever comes next, while the height setting reads back exactly as
- *      written. Measured 21-09-2026: `height:221px` stored, a header about 103px tall on the page.
+ *   5. THE CRAMPED HEADER. A header sizes to its content when its layout is `stacked` (which ignores
+ *      `height`) or when it has no height, and then its card design is its only source of vertical
+ *      space. With 0 vertical padding the nav row touches whatever comes next, while the height setting
+ *      reads back exactly as written. Measured 21-09-2026: `height:221px` stored, a header about 103px
+ *      tall on the page. A height that is not a real length (`auto`, `0`) is worse: the plugin still
+ *      zeroes the card design's padding for it.
  *
  *   6. THE SEE-THROUGH STUCK HEADER. Once a sticky header sticks, whichever rule wins the cascade
  *      paints it. A transparent winner lets the page scroll visibly through the bar, and nothing at
@@ -780,43 +782,116 @@ async function readPageBackgrounds(call, R, resolve, designs) {
 }
 
 /**
- * 5 — THE CRAMPED STACKED HEADER. For each header design on the `stacked` layout: does its card
- * design give it ANY vertical padding, on desktop and on phones?
- *
- * `stacked` forces `height:auto` over whatever height was set, and never gets the padding guard the
- * one-row layouts get, so the bar is exactly its two rows plus the card design's top and bottom
- * padding. With both at 0 the logo sits on the bar's top edge and the nav row on the next section.
+ * The value the plugin's header compiler treats as "a height is set". It mirrors
+ * StyleManagerBK_cl::getSingleCssPropertyValue($style, 'height', true) (styleManagerBK.php:550-596):
+ * a var(), else any word, else any number with or without a unit, each found as `height:` followed
+ * DIRECTLY by the value, the first match winning; '' when none matches. generated_css.php:31 then
+ * emits the padding guard (`padding-top/bottom: 0 !important`) for ANY non-empty value on a one-row
+ * layout. Mirrored, not improved: this check has to agree with what the plugin compiles, and the
+ * plugin counts `auto`, `0` or a bare `60` as a set height.
  */
-function checkStackedHeaders(headers, presetsById) {
+function pluginHeightGuardValue(style) {
+  const s = String(style ?? '');
+  const m = s.match(/height:(var\([^)]+\))/) || s.match(/height:([a-zA-Z-]+)/)
+    || s.match(/height:(-?\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw)?)/);
+  return m ? m[1] : '';
+}
+
+/**
+ * Whether the header's own `height` gives the bar a size in the BROWSER: the last `height`
+ * declaration, as a positive length with a unit. `auto`, `0`, a percentage of an auto-height parent,
+ * a word, or a bare number (invalid CSS, dropped) all leave it sized to its content. A function
+ * (var, calc, clamp, min, max) cannot be resolved here, so it is taken as a real height.
+ */
+function headerHasFixedHeight(style) {
+  const d = declarations(style).filter((x) => x.prop === 'height').pop();
+  if (!d) return false;
+  const v = d.value.trim().toLowerCase();
+  if (/^(var|calc|clamp|min|max)\(/.test(v)) return true;
+  const m = v.match(/^\+?(\d*\.?\d+)(px|r?em|vh|vw|vmin|vmax|svh|lvh|dvh|pt|pc|cm|mm|in|q|ch|ex|r?lh)$/);
+  return !!m && Number(m[1]) > 0;
+}
+
+/**
+ * Does a card design breakpoint give the bar any top or bottom padding? Under the plugin's padding
+ * guard only an `!important` declaration survives: the card design's doubled class out-ranks the
+ * guard's single one, so force_styles, or an explicit !important, keeps its padding.
+ */
+function hasVerticalPadding(map, guarded) {
+  const side = (prop) => {
+    const e = map.get(prop);
+    return (!e || (guarded && !e.important)) ? '0' : e.value;
+  };
+  return !(isZeroLength(side('padding-top')) && isZeroLength(side('padding-bottom')));
+}
+
+/**
+ * 5 — THE CRAMPED HEADER. Does every header that sizes to its content have vertical space, on desktop
+ * and on phones?
+ *
+ * A header sizes to its content in three cases (generated_css.php: `height: fit-content`, then the
+ * design's style, then the guard):
+ *   a. `stacked`: it forces `height:auto` over any height and never gets the guard, so the bar is its
+ *      two rows plus the card design's top and bottom padding.
+ *   b. a one-row layout with NO height: no guard either, so the card design's padding is again the
+ *      only vertical space. The shipped `height:60px` avoids this; removing it re-opens it.
+ *   c. a one-row layout whose height is not a real length (`auto`, `0`, a bare number): the plugin
+ *      still counts it as set and zeroes the padding, so only !important padding survives.
+ * A one-row layout with a real height has room and is not checked here.
+ */
+function checkHeaderVerticalSpace(headers, presetsById) {
   const problems = [];
   let checked = 0;
   for (const d of headers) {
-    if (String(d.settings.main_header_layout ?? '') !== 'stacked') continue;
+    const stacked = String(d.settings.main_header_layout ?? '') === 'stacked';
+    const style = d.settings.main_header_container_style ?? '';
+    if (!stacked && headerHasFixedHeight(style)) continue;
     checked++;
+    // generated_css.php:31 never emits the guard for `stacked`.
+    const guard = stacked ? '' : pluginHeightGuardValue(style);
     const id = Number(d.settings.main_header_container_preset ?? 0);
     const preset = presetsById.get(String(id));
     const at = presetAt(preset);
     const flat = [];
     for (const [bp, map] of [['desktop', at?.desktop], ['phones', at?.phone]]) {
-      if (!map || (isZeroLength(map.get('padding-top')?.value) && isZeroLength(map.get('padding-bottom')?.value))) {
-        flat.push(bp);
-      }
+      if (!map || !hasVerticalPadding(map, guard !== '')) flat.push(bp);
     }
     if (!flat.length) continue;
+
+    if (guard !== '') {
+      problems.push(
+        `${d.label}: the header's height is \`${guard}\`, which gives the bar no height of its own on ${flat.join(' or on ')}, ` +
+        'yet the plugin still counts it as a set height.\n' +
+        '      Any height value switches on the rule that zeroes the card design\'s top and bottom padding,\n' +
+        '      a rule meant for a fixed-height bar. So this bar is only as tall as its content, with no\n' +
+        '      padding at all. Set a real length (the shipped value is 60px), or remove the height and give\n' +
+        '      the card design padding-top and padding-bottom in css_default AND css_mobile. See\n' +
+        '      api-recipes.md → "Header height: what sets it depends on the layout".'
+      );
+      continue;
+    }
+
     const why = !preset
       ? `it points at card design #${id}, which does not exist on this install, so nothing pads it`
       : !at
         ? `its card design #${id} "${preset.title}" is switched off (is_active "${preset.is_active}"), so it compiles no CSS at all`
         : `its card design #${id} "${preset.title}" sets no top or bottom padding on ${flat.join(' or on ')} ` +
           `(css_default \`${preset.css_default || '—'}\`, css_mobile \`${preset.css_mobile || '—'}\`)`;
-    problems.push(
-      `${d.label}: the header layout is \`stacked\`, and ${why}.\n` +
-      '      A stacked header ignores `height` and sizes to its two rows, so the card design\'s top and\n' +
-      '      bottom padding is the ONLY vertical space it has. Without it the logo sits on the bar\'s top\n' +
-      '      edge and the nav row touches whatever comes next, while the height reads back as written.\n' +
-      '      Give the card design padding-top and padding-bottom in css_default AND css_mobile. Check its\n' +
-      '      used_count first: if it is shared, create a card design for the header alone. See\n' +
-      '      api-recipes.md → "Header height: what sets it depends on the layout".'
+    problems.push(stacked
+      ? `${d.label}: the header layout is \`stacked\`, and ${why}.\n` +
+        '      A stacked header ignores `height` and sizes to its two rows, so the card design\'s top and\n' +
+        '      bottom padding is the ONLY vertical space it has. Without it the logo sits on the bar\'s top\n' +
+        '      edge and the nav row touches whatever comes next, while the height reads back as written.\n' +
+        '      Give the card design padding-top and padding-bottom in css_default AND css_mobile. Check its\n' +
+        '      used_count first: if it is shared, create a card design for the header alone. See\n' +
+        '      api-recipes.md → "Header height: what sets it depends on the layout".'
+      : `${d.label}: the header has no height, so it sizes to its content, and ${why}.\n` +
+        '      With no height the bar is only as tall as its content plus the card design\'s top and\n' +
+        '      bottom padding, the same as a stacked header. Without that padding the logo sits on the\n' +
+        '      bar\'s top edge and the nav row touches whatever comes next. Give the card design\n' +
+        '      padding-top and padding-bottom in css_default AND css_mobile (check its used_count first:\n' +
+        '      if it is shared, create a card design for the header alone), or set a height again: the\n' +
+        '      shipped value is 60px. See api-recipes.md → "Header height: what sets it depends on the layout".'
     );
   }
   return { checked, problems };
@@ -1530,11 +1605,11 @@ async function main(base) {
     const resolve = colourResolver(paletteRead.error ? null : paletteRead.rows);
     const headers = designs.filter((d) => d.type === 'header');
 
-    const stacked = checkStackedHeaders(headers, presetsById);
-    problems.push(...stacked.problems);
-    if (stacked.checked && !stacked.problems.length) {
-      line(true, `the stacked header has vertical padding on desktop and on phones (${stacked.checked} checked)`);
-      passed.push('the stacked header has vertical space');
+    const headerSpace = checkHeaderVerticalSpace(headers, presetsById);
+    problems.push(...headerSpace.problems);
+    if (headerSpace.checked && !headerSpace.problems.length) {
+      line(true, `the header has vertical space on desktop and on phones (${headerSpace.checked} checked)`);
+      passed.push('the header has vertical space');
     }
 
     const sticky = checkStickyHeaders(headers, presetsById, resolve, version);
