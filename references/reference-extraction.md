@@ -123,6 +123,15 @@ any work starts, the same way it checks for `codbrand-content-builder`.
 - **An `unmeasurable` row NEVER counts as a match.** It is reported, and the merchant is told which
   parts of their reference you could not check. A gate that passes because it could not look is worse
   than no gate — it converts "I don't know" into "it matches".
+- **A value you SET is not a value you MEASURED.** Sizes are computed style too, not only colours:
+  `header.height`, `logo_width` and every gutter. Your own setting records what you asked for, and a
+  layout or a card design can override it on the page. Without a browser, mark those rows
+  `unmeasurable` as well, **even when a setting states the exact number**. Those are the rows most
+  likely to be wrong.
+
+  *Measured 21-09-2026: a build with no browser marked the topbar and footer heights `unmeasurable`,
+  but filled `header.height` from its own `height:221px` setting. `match.mjs` counted 221 → 221 as a
+  match. On the page the header was about 103px tall, because the `stacked` layout ignores height.*
 
 ## The four measurement rules
 

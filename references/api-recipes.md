@@ -444,6 +444,30 @@ Pick a layout because you want that arrangement. Read the live list from
 `GET section_manager/global_settings/header/{id}` → `settings_schema.main_header_layout.options`
 rather than assuming any particular value is still the shipped default.
 
+### Header height: what sets it depends on the layout
+
+`header.height` is one of the rows `match.mjs` compares with the reference. The setting that gets you
+there changes with `main_header_layout`:
+
+- **Every one-row layout** (all of them except `stacked`): a `height` in `main_header_container_style`
+  fixes the bar's height. While it is set, the bar's top and bottom padding is zeroed so the logo can
+  fill the bar.
+- **`stacked`**: `height` is ignored, and the bar always sizes to its two rows. Its vertical space comes
+  only from the top and bottom padding of the header's card design (`main_header_container_preset`),
+  set in that preset's `css_default`, plus `css_mobile` for phones. A card design with 0px vertical
+  padding renders a cramped header, whatever height you write.
+
+The header's style door refuses `padding` on purpose, because padding belongs to the card design.
+Check the preset's `used_count` before you edit it: a card design can be shared, and new padding lands
+on every surface that uses it. If it is not the header's alone, create one for the header through
+`design_controls/presets` (an `apply` entry with no id creates one), and point
+`main_header_container_preset` at it. Leave `force_styles` off on that card design: it adds
+`!important` to every declaration, so if the design sets a background, the sticky bar's own background
+can no longer win.
+
+*Added 21-09-2026: a build set `height:221px` on a stacked header whose card design had 0px vertical
+padding. The height did nothing, the style door refused padding, and the header shipped cramped.*
+
 ## Verify at the end, in the browser
 
 The API returning `200` proves the value was stored, not that the store looks right. Before you tell
