@@ -461,9 +461,9 @@ The header's style door refuses `padding` on purpose, because padding belongs to
 Check the preset's `used_count` before you edit it: a card design can be shared, and new padding lands
 on every surface that uses it. If it is not the header's alone, create one for the header through
 `design_controls/presets` (an `apply` entry with no id creates one), and point
-`main_header_container_preset` at it. Leave `force_styles` off on that card design: it adds
-`!important` to every declaration, so if the design sets a background, the sticky bar's own background
-can no longer win.
+`main_header_container_preset` at it. Leave `force_styles` off on that card design and on the two menu
+text designs (`main_nav_items_text_preset`, `end_menu_items_text_preset`). It adds `!important` to
+every declaration, so the stuck bar's own background and text colour could no longer win.
 
 *Added 21-09-2026: a build set `height:221px` on a stacked header whose card design had 0px vertical
 padding. The height did nothing, the style door refused padding, and the header shipped cramped.*
@@ -575,6 +575,22 @@ Judgement, not a field list — read the keys from `settings_schema` on the desi
   than two columns of four.
 - **Column order is a decision**, not a default to inherit — the door's own docs page says which
   ordering tokens it honours and which it silently ignores.
+
+### A coloured band needs its own side padding, on phones too
+
+This applies to every design, not only the footer. If a design's card design paints a background that
+differs from the page, the text inside it needs that card design's own side padding. The page gutter
+will not provide it: the width class pads an outer wrapper, so it moves the whole band away from the
+screen edge, not the text away from the band's edge. `codbrand-content-builder` enforces the same rule
+for page blocks.
+
+Set the padding for **both** breakpoints: `css_default` for desktop and `css_mobile` for phones.
+`css_mobile` wins on phones for every property it declares, so after you change padding in one, read
+the other.
+
+*Added 21-09-2026: a build gave its footer band `padding:56px 15px 40px 15px` on desktop but left
+`css_mobile` at `padding:40px 0px 28px 0px`. The desktop footer looked right, and on phones the text
+sat on the grey band's edges.*
 
 ## The three surfaces read differently per archetype
 
