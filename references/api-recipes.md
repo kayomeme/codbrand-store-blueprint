@@ -367,6 +367,15 @@ the design, so set the page's blocks as well, or leave them on `inherit`. Read t
 `settings_schema` for the current buttons-layout values rather than trusting this paragraph. Then look
 at the grid at 390px in the phase-10 browser pass.
 
+### Reviews on a product page get one or two columns, never three
+
+The product page's reviews block renders inside the product-info column, not across the page, so it is
+working with roughly half the width even on a desktop. Three columns there give each card a strip too
+narrow for a sentence, and the same design read fine on the home page, where it has the full width.
+
+Set the product page's reviews to 1 or 2 columns and check it in the phase-10 browser pass at 1440 as
+well as at 390 — this is one of the few places where the desktop view is the cramped one.
+
 `codbrand-content-builder` is required, not optional, and `preflight.mjs` checks it is installed
 before any work begins. If it is missing, say so and stop — writing the markup yourself produces a
 visibly thinner store, which is the failure this arrangement exists to prevent.
