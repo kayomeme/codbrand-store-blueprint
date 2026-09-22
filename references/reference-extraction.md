@@ -189,6 +189,27 @@ If one measurement disagrees with another, the disagreement is the finding. Stop
 Computed style tells you what one node says. It cannot tell you the bar looks wrong. Take the
 screenshot and look at it — especially before writing "matches".
 
+## `scripts/measure.js` measures every row below — run it, do not eyeball
+
+It returns a whole spec, in the shape `match.mjs` reads. Run it IN the page you are measuring: paste
+the file into the console, or pass it to your browser tool's evaluate. Once per page and per width, on
+the reference and on what you built.
+
+- **Clear the page and take the screenshot yourself first.** It never dismisses anything. When
+  something fixed still covers a quarter of the screen it stops and names it; set
+  `window.CL_MEASURE_IGNORE_OVERLAYS = true` only once your screenshot shows that element is part of
+  the design.
+- **The rules on this page are built in:** the plugin's own containers are read first on a store you
+  built, backgrounds walk up from the visible text, colours come in pairs, an unreadable pair is
+  refused. A reference with no `<header>` or heading tags — page builders often have neither — is read
+  by its geometry instead.
+- **Measure by hand only what it returns `unmeasurable`**, and replace those rows in the file. On a
+  reference that always includes the review-card and product-card rows (every theme builds them
+  differently), plus anything painted with an image or a gradient.
+- **A row you measure by hand must follow the definitions in the script's header** — how footer
+  columns are counted, which side a gutter is read from, what the page's max width is. A value measured
+  some other way does not compare, and `match.mjs` cannot tell.
+
 ## What to measure — and the `id` for each row
 
 ⚠️ **Use these `id` strings exactly.** `match.mjs` diffs the two passes **by `id`**, so an id you
@@ -233,11 +254,11 @@ so these rows are where a design left at its shipped look gets caught.
 | `reviews.badge_present` · `reviews.date_kind` | the verified-buyer badge; `date_kind`: `relative`, `absolute` or `none` |
 | `plist1.card_bottom_row` | what shares the card's last row, left to right, joined by `+`: `"price+button"`, or `"button"` alone. A **string**, never an array — `match.mjs` treats an array as readable without a render, and a row's layout is not |
 | `plist1.button_kind` · `plist1.badge_position` | `button_kind`: `text`, `icon` or `none`; `badge_position`: `image` (over the photo), `inline` or `none` |
+| `plist1.columns` · `plist1.card_ratio` | the cards a visitor sees side by side — a carousel's cards scrolled out of view do not count; the first card's image, width over height |
 
 **Beyond these, the gate is only as wide as what you write into the spec.** The product page, the
-cart and the menus are not listed — nothing stops you adding rows for them (`plist1.card_ratio`,
-`plist1.columns`), and on a reference where they are the point, you should. Exit 0 means *the rows
-you wrote agree*, never *the store matches*.
+cart and the menus are not listed — nothing stops you adding rows for them, and on a reference where
+they are the point, you should. Exit 0 means *the rows you wrote agree*, never *the store matches*.
 
 ## The spec shape
 
