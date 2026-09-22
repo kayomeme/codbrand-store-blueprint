@@ -182,6 +182,26 @@ others alone.
 finish the store, and tell them at handover that the funnel needs one Save in wp-admin → Store
 settings before they take a real order. That is a sentence they can act on; a dead build is not.
 
+## Express checkout — a decision, not a default
+
+Express checkout puts the whole order on the product page: the shopper opens a product, fills the
+form and orders, with no cart step. It is a way of building the store, not a switch. Decide it with
+the merchant's selling in mind (one hero product sold from ads is the classic case; a catalogue that
+shoppers browse and combine is not), then **read `GET /docs/express_checkout` before touching
+anything** — it holds the rules this section does not repeat.
+
+- **Where it sits in the order:** the two modes are a `stores` write (phase 4, beside
+  `ensure_pages` — still call it: the open-cart button on non-product pages still goes to the cart
+  page); arranging the page is the product design's order list (phase 5).
+- **The quiet failure:** `checkout_mode: in_product` with any other `cart_mode`. The form shows up
+  exactly where it should, and orders whatever the cart holds instead of the product on screen. Set
+  **both** modes.
+- **The aim is a short page.** Choose per store which blocks it needs; showing every block defeats
+  the purpose. Hide a block with its switch, never by dropping it from the order list — the doc says
+  why.
+- **Verify on a product page:** the summary lists that product at its price, the total includes
+  delivery, and no other product appears.
+
 ## Things that fail quietly
 
 **A write that succeeds is not a write that shows.** Several settings only take effect when a sibling
@@ -266,6 +286,10 @@ PATCH /cl-api/v1/pages/{id}/plugin      {"width_mode": "none"}
 `""` inherits · `none` = no wrapper, true edge-to-edge · or one of the four store width classes.
 The same door exists on `products/{id}/plugin`, where it wraps the landing content under the product
 block.
+
+**The front page is the exception:** there `""` gives no wrapper at all, because the plugin removes
+it for a designed home. To box the front page, send one of the four classes explicitly; an explicit
+value is kept (it was not, between 12-09 and 22-09-2026).
 
 **Which to send:**
 
