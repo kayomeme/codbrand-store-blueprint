@@ -220,6 +220,12 @@ never even shown; flipping `shipping_rates_is_active` to `"yes"` made the same t
 selectable options, and the next order booked at product price **+ the selected rate's cost**,
 matching the quote exactly. Check this gate in the same phase you create the rates, not after.
 
+**A design's custom CSS can lose to the plugin's own, silently.** Scoping decides where a rule
+applies, not how strong it is: a plain selector keeps only its own weight, so a shipped two-class rule
+(a listing card's `display: flex`) beats your one-class rule whatever the order. Look for a setting
+first; when CSS is the only way, read `/docs/custom_code_css_js` → "Winning against the plugin's own
+CSS" — a written `:scope` adds the class you need.
+
 **Design settings are per SM instance, and a store chooses which instance it uses.** Writing to an
 instance no store points at changes nothing visible. Resolve which instance the store actually uses
 before writing to it.
@@ -289,7 +295,7 @@ block.
 
 **The front page is the exception:** there `""` gives no wrapper at all, because the plugin removes
 it for a designed home. To box the front page, send one of the four classes explicitly; an explicit
-value is kept (it was not, between 12-09 and 22-09-2026).
+value is kept.
 
 **Which to send:**
 
@@ -506,8 +512,9 @@ It applies only while `logo_image_url` is empty. Verify the result by reading `g
 is exactly how a wrong-looking header goes unnoticed.
 
 ⚠️ An earlier version of this page said there was no settings key and told you to write custom CSS on
-`.cl-logo-text` through the custom-code door. **Do not do that any more.** The preset prints after
-per-design custom CSS and wins a specificity tie, so such CSS now silently loses. A store that still
+`.cl-logo-text` through the custom-code door. **Do not do that any more.** A typography preset's
+selector repeats its class three times, so it outranks a one-class rule whatever the order, and such
+CSS now silently loses. A store that still
 carries one from before: move its values into a preset, set `logo_text_preset` to it, delete the CSS.
 
 ### ⚠️ Correction — `nav_center` DOES render the logo

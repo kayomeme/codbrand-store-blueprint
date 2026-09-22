@@ -61,6 +61,14 @@
  *      blueprint, and the store can disagree with it: a countdown the merchant was told is OFF shipped
  *      ON, and options ticked ON had no rows behind them. Measured on the same build.
  *
+ *  10. THE INVISIBLE WHATSAPP BUTTON. Switched on with a number and no image, the floating button is
+ *      an empty link — its image is all it shows, and the image ships empty.
+ *
+ *  11. THE STORE ONLY ITS OWNER CAN SEE. A host's coming-soon page answers a logged-out visitor with
+ *      its own page while the api keeps working, so every check above can pass for a store customers
+ *      cannot open. Reported to be told first, not as a failure: it is a host setting, and possibly
+ *      deliberate before a launch.
+ *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
  *
@@ -1161,6 +1169,67 @@ function checkShopperScript(store, designs) {
   return { script, code, scanned, flagged };
 }
 
+/**
+ * THE INVISIBLE WHATSAPP BUTTON. The floating button prints nothing but its image: switched on with a
+ * number and no `whatsapp_bt_img_url`, the page gets an empty link — nothing to see, nothing to tap,
+ * a 200 everywhere. Switched on with a number under three characters, it prints nothing at all. The
+ * image ships empty, so "switch it on and add the number" is exactly the build that ships it invisible.
+ *
+ * Named keys, unlike the hollow check: this is one element with its own vocabulary, and the two
+ * conditions mirror the view's own. A design without the switch is reported as not checked.
+ */
+function checkWhatsappButton(designs) {
+  const problems = [];
+  const unknown = [];
+  let checked = 0;
+  for (const d of designs.filter((x) => x.type === 'whatsapp')) {
+    const s = d.settings;
+    if (!('whatsapp_bt_active' in s)) { unknown.push(d.label); continue; }
+    checked++;
+    if (!yes(s.whatsapp_bt_active)) continue;
+    if (String(s.whatsapp_bt_number ?? '').length < 3) {
+      problems.push(
+        `${d.label}: the WhatsApp button is switched on with no number (\`whatsapp_bt_number\`), so it does\n` +
+        '      not render at all. Write the merchant\'s number, or switch it off (`whatsapp_bt_active: "no"`).'
+      );
+    } else if (!isSet(s.whatsapp_bt_img_url)) {
+      problems.push(
+        `${d.label}: the WhatsApp button is on and has a number, but no image (\`whatsapp_bt_img_url\` is\n` +
+        '      empty). The image is all it shows, so the page carries an empty link: nothing visible, nothing\n' +
+        '      to tap. Upload an icon through `media` and write its url (and `whatsapp_bt_img_id`).'
+      );
+    }
+  }
+  return { problems, unknown, checked };
+}
+
+/**
+ * THE STORE ONLY ITS OWNER CAN SEE. A host's "coming soon" or maintenance page answers a logged-out
+ * visitor with its own page — often a 200 — while every api call above keeps working with the key.
+ * So a build can pass every check and still show customers nothing. Measured on one host: HTTP 200,
+ * `<title>Prochainement</title>`, and not one trace of the plugin in the page.
+ *
+ * The test is the plugin's own storefront markup, never the status code: its asset folder, or the
+ * `cl_ajax_nonce` global printed on every storefront page. Either is enough, so a cache plugin that
+ * merges the asset files does not trip it. NOT a `cl-design` anchor: that same host's coming-soon
+ * page still ran the site footer, so the cart drawer's anchor was on it while nothing else of the
+ * store was. Fetched without a session, as a customer is.
+ */
+async function checkPublicHome(siteUrl) {
+  try {
+    const res = await fetch(`${siteUrl}/`, { redirect: 'follow', headers: { Accept: 'text/html' } });
+    const html = await res.text();
+    const title = ((html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] ?? '').trim();
+    return {
+      status: res.status,
+      title,
+      store: /\/plugins\/cod-leads-for-elementor\/|cl_ajax_nonce/.test(html),
+    };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 const yes = (v) => String(v ?? '') === 'yes';
 
 /**
@@ -1504,6 +1573,17 @@ async function main(base) {
   if (!hollow && designs.length) passed.push('nothing switched on and empty');
   const settingsByDesign = new Map(designs.map((d) => [d.label, d.settings]));
 
+  /* ── the WhatsApp button, which shows nothing but its image ──────────────────────────────────── */
+  const whatsapp = checkWhatsappButton(designs);
+  problems.push(...whatsapp.problems);
+  for (const u of whatsapp.unknown) {
+    notes.push(`${u}: the WhatsApp button was not checked — this install's design has no \`whatsapp_bt_active\`.`);
+  }
+  if (whatsapp.checked && !whatsapp.problems.length) {
+    line(true, 'the WhatsApp button is off, or has a number and an image');
+    passed.push('the WhatsApp button can be seen');
+  }
+
   /* ── dangling icon ids: invisible at runtime, so this is the only place they can be caught ──── */
   const icons = await checkIcons(call, R, settingsByDesign);
   if (icons.skipped) {
@@ -1685,6 +1765,22 @@ async function main(base) {
     }
   }
 
+  /* ── what a customer actually gets: the home page, logged out ────────────────────────────────── */
+  const siteUrl = base.replace(/\/wp-json\/cl-api\/v1$/, '');
+  const publicHome = await checkPublicHome(siteUrl);
+  let hiddenStore = '';
+  if (publicHome.error) {
+    line(false, `the public home page could not be fetched — ${publicHome.error}`);
+    problems.push(`the public home page was NOT checked — ${publicHome.error}. A check that did not run is not a pass: re-run.`);
+  } else if (!publicHome.store) {
+    hiddenStore = `a logged-out visitor to ${siteUrl}/ gets HTTP ${publicHome.status}` +
+      (publicHome.title ? ` "${publicHome.title}"` : '') + ', a page with none of the store in it';
+    notes.push(`THE STORE IS NOT PUBLIC: ${hiddenStore}. Usually the host's coming-soon or maintenance mode.`);
+  } else {
+    line(true, 'a logged-out visitor gets the store');
+    passed.push('the public sees the store');
+  }
+
   if (unreadable.length) {
     console.log('');
     for (const u of unreadable) line(false, `could not read ${u} — NOT checked, and not passed`);
@@ -1707,6 +1803,13 @@ async function main(base) {
   // ONLY what ran and passed. A check that could not apply to this store is a `!` line above, never
   // a word in this sentence.
   line(true, passed.join('; '));
+  // Not a failure of the build — a host setting only the merchant can turn off, and possibly on
+  // purpose before a launch. It is still the first thing they must hear: every check above passed
+  // for a store their customers cannot open.
+  if (hiddenStore) {
+    console.log(`\n  ! TELL THE MERCHANT FIRST: the store is not public yet — ${hiddenStore}.`);
+    console.log('    Customers cannot see any of this until they switch that page off in their hosting panel.');
+  }
   // THE REPLACE-LIST. Since 20-09-2026 a store is built in full out of PLACEHOLDER content, so
   // "passes every check" and "ready for customers" stopped being the same sentence. The script
   // cannot compute this -- it has no way to tell an invented product from a real one -- so it

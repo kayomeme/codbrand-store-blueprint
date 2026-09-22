@@ -219,10 +219,25 @@ escapes**, because a row present only in your build is reported and not failed.
 | `footer.gutter_left` · `footer.bottom_bar_gutter_left` | **these two should agree.** A mismatch is a real defect and very easy to miss by eye |
 | `page.background` · `page.max_width` · `page.gutter` | |
 
-**This list is the chrome only, and the gate is only as wide as what you write into the spec.** The
-product grid, the product page, the cart and the menus are not in it — nothing stops you adding rows
-for them (`plist1.card_ratio`, `plist1.columns`), and on a reference whose product cards are the
-point, you should. Exit 0 means *the rows you wrote agree*, never *the store matches*.
+**When the store shows reviews or a product grid, measure those too**, with these fixed ids. A
+component the plugin renders is styled once, in its design, and shows on every page that places it —
+so these rows are where a design left at its shipped look gets caught.
+
+| id | notes |
+|---|---|
+| `reviews.card_background` · `reviews.text_color` | **pair** them |
+| `reviews.card_border` · `reviews.card_padding` | the card box |
+| `reviews.avatar_kind` | `photo`, `initials`, `placeholder` (a generic silhouette) or `none` |
+| `reviews.text_lines` | lines of review text shown before it is cut; `0` when it is never cut |
+| `reviews.name_font_family` · `reviews.name_font_size` · `reviews.name_font_style` | |
+| `reviews.badge_present` · `reviews.date_kind` | the verified-buyer badge; `date_kind`: `relative`, `absolute` or `none` |
+| `plist1.card_bottom_row` | what shares the card's last row, left to right, joined by `+`: `"price+button"`, or `"button"` alone. A **string**, never an array — `match.mjs` treats an array as readable without a render, and a row's layout is not |
+| `plist1.button_kind` · `plist1.badge_position` | `button_kind`: `text`, `icon` or `none`; `badge_position`: `image` (over the photo), `inline` or `none` |
+
+**Beyond these, the gate is only as wide as what you write into the spec.** The product page, the
+cart and the menus are not listed — nothing stops you adding rows for them (`plist1.card_ratio`,
+`plist1.columns`), and on a reference where they are the point, you should. Exit 0 means *the rows
+you wrote agree*, never *the store matches*.
 
 ## The spec shape
 
