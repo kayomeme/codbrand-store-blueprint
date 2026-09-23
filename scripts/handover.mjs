@@ -61,8 +61,9 @@
  *      blueprint, and the store can disagree with it: a countdown the merchant was told is OFF shipped
  *      ON, and options ticked ON had no rows behind them. Measured on the same build.
  *
- *  10. THE INVISIBLE WHATSAPP BUTTON. Switched on with a number and no image, the floating button is
- *      an empty link — its image is all it shows, and the image ships empty.
+ *  10. THE MISSING WHATSAPP BUTTON. Switched on with no number, the floating button renders nothing
+ *      at all, and the number ships empty. (Before plugin 1.2.799 it was also invisible with no image;
+ *      it now falls back to the icon library's WhatsApp icon.)
  *
  *  11. THE STORE ONLY ITS OWNER CAN SEE. A host's coming-soon page answers a logged-out visitor with
  *      its own page while the api keeps working, so every check above can pass for a store customers
@@ -1170,13 +1171,12 @@ function checkShopperScript(store, designs) {
 }
 
 /**
- * THE INVISIBLE WHATSAPP BUTTON. The floating button prints nothing but its image: switched on with a
- * number and no `whatsapp_bt_img_url`, the page gets an empty link — nothing to see, nothing to tap,
- * a 200 everywhere. Switched on with a number under three characters, it prints nothing at all. The
- * image ships empty, so "switch it on and add the number" is exactly the build that ships it invisible.
+ * THE MISSING WHATSAPP BUTTON. Switched on with a number under three characters, the floating button
+ * prints nothing at all — a 200 everywhere. An empty `whatsapp_bt_img_url` is NOT a problem: since
+ * plugin 1.2.799 the button falls back to the icon library's WhatsApp icon.
  *
- * Named keys, unlike the hollow check: this is one element with its own vocabulary, and the two
- * conditions mirror the view's own. A design without the switch is reported as not checked.
+ * Named keys, unlike the hollow check: this is one element with its own vocabulary, and the condition
+ * mirrors the controller's own. A design without the switch is reported as not checked.
  */
 function checkWhatsappButton(designs) {
   const problems = [];
@@ -1191,12 +1191,6 @@ function checkWhatsappButton(designs) {
       problems.push(
         `${d.label}: the WhatsApp button is switched on with no number (\`whatsapp_bt_number\`), so it does\n` +
         '      not render at all. Write the merchant\'s number, or switch it off (`whatsapp_bt_active: "no"`).'
-      );
-    } else if (!isSet(s.whatsapp_bt_img_url)) {
-      problems.push(
-        `${d.label}: the WhatsApp button is on and has a number, but no image (\`whatsapp_bt_img_url\` is\n` +
-        '      empty). The image is all it shows, so the page carries an empty link: nothing visible, nothing\n' +
-        '      to tap. Upload an icon through `media` and write its url (and `whatsapp_bt_img_id`).'
       );
     }
   }
@@ -1573,14 +1567,14 @@ async function main(base) {
   if (!hollow && designs.length) passed.push('nothing switched on and empty');
   const settingsByDesign = new Map(designs.map((d) => [d.label, d.settings]));
 
-  /* ── the WhatsApp button, which shows nothing but its image ──────────────────────────────────── */
+  /* ── the WhatsApp button, which renders nothing without a number ─────────────────────────────── */
   const whatsapp = checkWhatsappButton(designs);
   problems.push(...whatsapp.problems);
   for (const u of whatsapp.unknown) {
     notes.push(`${u}: the WhatsApp button was not checked — this install's design has no \`whatsapp_bt_active\`.`);
   }
   if (whatsapp.checked && !whatsapp.problems.length) {
-    line(true, 'the WhatsApp button is off, or has a number and an image');
+    line(true, 'the WhatsApp button is off, or has a number');
     passed.push('the WhatsApp button can be seen');
   }
 

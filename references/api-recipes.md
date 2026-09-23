@@ -234,9 +234,12 @@ before writing to it.
 Adding is safe; **editing a token another store references restyles that store too.** On a
 multi-store install, add and point rather than edit.
 
-**Media is upload-only.** No update, no delete, and it dedupes by content hash — so re-uploading the
-same bytes is safe and free, but iterating on a logo leaves the earlier attempts in the library.
-Never promise the merchant a cleanup the API cannot do.
+**Media dedupes by content hash**, so re-uploading the same bytes is safe and free. An image uploaded
+through the API can be cleaned up later: `GET media/{id}/usage` shows where it is used, `DELETE
+media/{id}` removes it once nothing uses it (needs the key's `media` delete grant), and `PUT
+media/{id}/file` swaps the picture inside it when the new one has the same format and size — so a
+logo iteration of the same size needs no re-linking. Images the merchant added in wp-admin cannot be
+deleted or replaced through the API; never promise that cleanup. See `/docs/media_usage_and_delete`.
 
 **Some things have no door — but CHECK before you say so.** A contact form is the known one: you can
 build a Contact page, but it lists WhatsApp / phone / email rather than a working form. Say so rather
