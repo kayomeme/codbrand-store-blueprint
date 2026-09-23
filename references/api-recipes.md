@@ -234,12 +234,19 @@ before writing to it.
 Adding is safe; **editing a token another store references restyles that store too.** On a
 multi-store install, add and point rather than edit.
 
-**Media dedupes by content hash**, so re-uploading the same bytes is safe and free. An image uploaded
-through the API can be cleaned up later: `GET media/{id}/usage` shows where it is used, `DELETE
-media/{id}` removes it once nothing uses it (needs the key's `media` delete grant), and `PUT
-media/{id}/file` swaps the picture inside it when the new one has the same format and size — so a
-logo iteration of the same size needs no re-linking. Images the merchant added in wp-admin cannot be
-deleted or replaced through the API; never promise that cleanup. See `/docs/media_usage_and_delete`.
+**Media dedupes by content hash**, so re-uploading the same bytes is safe and free. When you upload an
+image you generated, send `"source_type": "trainedAlgorithmicMedia"` — it is recorded with the image.
+
+**What you may remove — a hard rule.** Delete or replace only images YOU added (uploaded through the
+API). Any other image — one the merchant added — only when the merchant has asked you to remove or
+replace THAT image; then, and only then, send `"merchant_confirmed": true`. Never set it to clean up on
+your own initiative, and never to get past a refusal.
+
+`GET media/{id}/usage` shows where an image is used. `DELETE media/{id}` refuses while anything uses it
+(point those places elsewhere first — a merchant's request does not override this) and needs the key's
+`media` delete grant. `PUT media/{id}/file` swaps the picture inside an image when the new one has the
+same format and size, so a logo iteration of the same size needs no re-linking. See
+`/docs/media_usage_and_delete`.
 
 **Some things have no door — but CHECK before you say so.** A contact form is the known one: you can
 build a Contact page, but it lists WhatsApp / phone / email rather than a working form. Say so rather
@@ -417,7 +424,8 @@ The docs cannot tell you the following:
   with no picture at all when the store has no logo. Check the `pages` door's own field list: if it
   takes no featured image, that fallback applies to every page you build.
 - **The seo design is listed by `GET section_manager/global_settings`** (type `seo`). Read it before
-  you assume any of its switches.
+  you assume any of its switches. Which one a store uses is `seo_sm_id` on the `stores` door; at 0 the
+  store uses the first active one, and `GET stores/{id}` names it under `renders.seo_sm_id`.
 - **Verify by reading the page's HTML**: the `<title>` and `<meta name="description">` tags. None of
   this shows on the page itself, so a screenshot proves nothing. A fetch is enough, and needs no
   browser.
