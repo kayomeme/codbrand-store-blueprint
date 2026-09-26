@@ -24,7 +24,7 @@
  * diffs the two, row by row.
  *
  * WHY THIS EXISTS AS A SCRIPT: because the alternative already failed. A build matched to a reference
- * "by eye" needed four rounds of the owner pointing at defects — a nav with 6 items where the
+ * "by eye" needed four rounds of review pointing at defects — a nav with 6 items where the
  * reference had 2, a footer column the reference did not have, a beige band where the reference was
  * neutral grey, and a topbar whose colours were inverted. Every one is a value comparison a machine
  * does perfectly and a reader skims past.

@@ -1,9 +1,12 @@
 # Reviewing the tools after a build
 
-Read this ONLY when the user writes **review the tools**. It is not part of building a store. It turns
-what went wrong, or slowly, during this build into precise feedback for the developers of this skill,
-of `codbrand-content-builder`, and of the store's api (`cl-api/v1`). The goal is to improve the TOOLS,
-not this store.
+Read this ONLY when the user writes **review the tools**. It is optional and not part of building a
+store. It turns what went wrong, or slowly, during this build into precise feedback for the CodBrand
+team, who build this skill, `codbrand-content-builder` and the store's api (`cl-api/v1`). The goal is
+to improve the TOOLS for every store, not this store.
+
+Nothing is sent anywhere. The report stays with the user, who decides whether to share it with the
+CodBrand team.
 
 ## How it runs
 
@@ -20,9 +23,9 @@ not this store.
    - **at most five suggestions**.
    All three are described below. Then ask whether the user wants to discuss any of them.
 4. **When the user writes `FINISH`:** write the report (the format is at the end of this file), as
-   ONE document the user can copy.
+   ONE document the user can copy. You send it nowhere yourself.
 
-Write everything in English, whatever language the store is in: the report is for the developers.
+Write everything in English, whatever language the store is in: the report is for the CodBrand team.
 
 ## Verifying a point: the rules
 
@@ -47,12 +50,12 @@ Write everything in English, whatever language the store is in: the report is fo
   `/docs/header_global_settings`, or the api's refusal message.
 - **An existing setting is not a missing feature.** If a control already existed that would have
   given the right result, name it.
-- **Be honest about your own part.** If the guidance was right and you did not follow it, the owner
+- **Be honest about your own part.** If the guidance was right and you did not follow it, the area
   is AGENT. Do not assign it to a tool.
 
-## Owners: attach every gap to ONE owner (you may name a second as "also")
+## Areas: attach every gap to ONE area (you may name a second as "also")
 
-| Owner | Means | Name precisely |
+| Area | Means | Name precisely |
 |---|---|---|
 | SKILL: store-blueprint | a step, rule, check or script was wrong, missing or unclear | file + section, or script + check |
 | SKILL: content-builder | the same, for the page-building skill | file + section, or script |
@@ -69,10 +72,10 @@ Write everything in English, whatever language the store is in: the report is fo
 - **Evidence:** what you measured, read or received: URL, element, setting value, api response, error text
 - **Exists already?** no, or yes (and where)
 - **Cause:** the chain, in 2 to 4 lines
-- **Owner:** one from the table, with the exact file, section, door or setting
-- **Fix idea:** what the tool should do or say, as a need. The developers decide how.
+- **Area:** one from the table, with the exact file, section, door or setting
+- **Fix idea:** what the tool should do or say, as a need. The CodBrand team decides how.
 
-End every reply with the running list of ALL gaps so far (G and A): id · title · verdict · owner.
+End every reply with the running list of ALL gaps so far (G and A): id · title · verdict · area.
 
 ## Your own gaps (A1, A2, …)
 
@@ -124,18 +127,18 @@ would save (time, mistakes, quality the shopper sees), and why it passes the thr
 
 ## The report: only after `FINISH`
 
-One self-contained markdown document, written for the developers of the plugin and the skills, who
-have never seen this store:
+One self-contained markdown document, written for the CodBrand team, who build the plugin and the
+skills and have never seen this store:
 
 1. **Context:** store URL; plugin version; each skill's name and the exact version tag you used; the
    active theme; which capabilities you had (browser, image generation, fetching pages).
-2. **Summary table:** every confirmed gap, with id, title, source (user or agent), owner and
+2. **Summary table:** every confirmed gap, with id, title, source (user or agent), area and
    severity. Severity is one of: seen by shoppers, seen by the merchant, or internal to the tools.
 3. **The user's gaps (G)**, then **your own gaps (A)**. For each gap:
    - the symptom;
    - the evidence;
    - why it happened, quoting the misleading or missing text or response;
-   - the owner and exact location;
+   - the area and exact location;
    - the proposed fix;
    - how to test the fix, i.e. what must be true afterwards.
 4. **The custom-code review**, one line per piece of code and its outcome.

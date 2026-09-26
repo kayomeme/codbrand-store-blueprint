@@ -18,16 +18,15 @@ a skill folder with no renaming and no merge step.
 
 The scripts are deliberately **dependency-free** — they run on bare `node`, with no install step.
 
-## Use the tag, not the default branch
+## Use exactly the tag your store names
 
-Each tag corresponds to a COD Leads plugin version. An agent reads the store's plugin version from
-`/cl-api/v1/me` and fetches the matching tag, so the references and scripts it uses always match the
-store it is inspecting and writing to.
+Each release is tagged `skill-YYYY-MM-DD.N` (for example `skill-2026-09-27.1`), and the `SKILL.md` a
+store serves belongs to one of them. The store reports that tag as `version_tag` in `/cl-api/v1/me`
+and `/cl-api/v1/skills`. Fetch exactly that tag, so the references and scripts you use always match
+the instructions and the store you are working on.
 
-The default branch may describe doors or behaviour that exist only in a newer plugin. Following it
-against an older store produces calls that fail, or markup that validates locally and then does not
-render.
+Stores whose plugin predates these releases report a `v{plugin version}` tag (for example `v1.2.811`).
+Those tags stay here. No tag is ever moved.
 
----
-
-*Repository created 19-09-2026. Content lands with the first tagged release.*
+The default branch, or a newer release, may describe doors or behaviour this store does not have.
+Following it produces calls that fail, or markup that validates locally and then does not render.

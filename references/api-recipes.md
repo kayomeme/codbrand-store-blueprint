@@ -488,11 +488,8 @@ A logo is two writes, not one, and the failure mode is silent.
    `site_icon_id` is the square favicon. Either door can write either field — `store_settings` by
    name, or `stores` as columns.
 
-   *This paragraph has been wrong twice today, so here is the whole of it. It first said
-   `store_settings` "exposes no logo field and will refuse one", which was false — it wrote the logo
-   column under the name `site_icon_id`. That was corrected to "they are ONE column, write it once",
-   which was true for a few hours and is now false too: the owner split them, so there are genuinely
-   two images. If you are reading a store built before the split, its logo column may hold a favicon.*
+   *The logo and the favicon are two separate images. A store built before they were split may
+   still have a favicon in its logo column.*
 
 ⚠️ **If you have no image, leave the slot ON — turning it off is what actually produces nothing.**
 An earlier version of this page said the opposite (`logo_image_is_active` → `no` "ships a text
