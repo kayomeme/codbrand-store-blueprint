@@ -11,11 +11,19 @@
  * If something fixed still covers much of the page it stops and lists it; once your screenshot shows
  * that element belongs to the design, set `window.CL_MEASURE_IGNORE_OVERLAYS = true` and run again.
  *
+ * On a PRODUCT page it also writes the `product.*` rows. A plugin store's product page, and a page that
+ * declares a Product (JSON-LD, og:type, a `single-product` body class), is recognised by itself; a page
+ * that declares nothing (a page builder's product page) is not — set `window.CL_MEASURE_PAGE = 'product'`
+ * first on that page. Measure the reference and the store in the SAME browser mode (a desktop window
+ * with its scrollbar, or a phone), or wrapping text makes heights and gutters differ for no real reason.
+ *
  * WHAT IT GUARANTEES
  * - The measuring rules are built in. A background walks UP from the visible text to the first
- *   painted ancestor, and an image or a gradient on the way makes the row unmeasurable. A text row
+ *   painted ancestor, and an image on the way makes the row unmeasurable. A text row
  *   reads the deepest element holding visible text. Colours come in pairs, and a pair at contrast
  *   1.5 or below is refused on both rows, because it proves one of them came off the wrong element.
+ *   A background of gradients only (no image) reads as its FIRST colour stop, on both passes, with a
+ *   note saying so.
  * - A store built with the plugin is read through its own containers and classes. A reference site
  *   is read through <header>, <footer>, <nav>, links to the home page, and page geometry.
  * - A row it cannot resolve with confidence comes back as `"value": null` with
@@ -48,7 +56,11 @@
 (() => {
   'use strict';
 
-  const W = window.innerWidth;
+  // The page's own width, WITHOUT a vertical scrollbar. window.innerWidth includes it, so in a desktop
+  // browser nothing ever reached "edge to edge" and every section-voting and right-to-left gap was off
+  // by the scrollbar (~15px). The viewport (VW) is still what the spec reports and checks.
+  const W = document.documentElement.clientWidth || window.innerWidth;
+  const VW = window.innerWidth;
   const H = window.innerHeight;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -89,16 +101,36 @@
     return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
   };
 
+  /**
+   * A background made of gradients only (no url()): its FIRST colour stop. Both passes read a
+   * gradient this way, so the reference and the store compare like with like — before 26-09-2026 a
+   * store's gradient topbar was unmeasurable while the reference's identical strip read as a colour.
+   */
+  const gradientStop = (image) => {
+    if (/url\(/i.test(image) || !/gradient\(/i.test(image)) return null;
+    const m = image.match(/rgba?\([^)]*\)/i);
+    return m ? parseColour(m[0]) : null;
+  };
+
   /** Rule 1, backgrounds: walk UP to the first opaque paint, blending any translucent layers. */
   const paintUp = (start) => {
     const layers = [];
+    let gradient = null;
+    let painter = null; // the element whose opaque paint ended the walk
     for (let el = start; el; el = el.parentElement) {
       const cs = getComputedStyle(el);
-      if (cs.backgroundImage && cs.backgroundImage !== 'none') return { image: el };
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') {
+        const stop = gradientStop(cs.backgroundImage);
+        if (!stop) return { image: el };
+        gradient = el;
+        layers.push(stop);
+        if (stop.a >= 0.99) { painter = el; break; }
+        continue;
+      }
       const c = parseColour(cs.backgroundColor);
       if (c && c.a > 0) {
         layers.push(c);
-        if (c.a >= 0.99) break;
+        if (c.a >= 0.99) { painter = el; break; }
       }
     }
     // Nothing opaque below: the page canvas, which browsers paint white.
@@ -108,8 +140,9 @@
       b: top.b * top.a + under.b * (1 - top.a),
       a: 1,
     }), { r: 255, g: 255, b: 255, a: 1 });
-    return { colour };
+    return { colour, gradient, painter };
   };
+  const gradientNote = (bg) => (bg.gradient ? { note: `a gradient on ${describe(bg.gradient)}: its first colour stop` } : {});
 
   /** Rule 1, text: the deepest element holding visible text. */
   const textDown = (root) => {
@@ -203,7 +236,7 @@
       unmeasurable(textId, why, { traversal: 'text-down', pair_with: bgId });
       return;
     }
-    add(bgId, colourString(bg.colour), { traversal: 'paint-up' });
+    add(bgId, colourString(bg.colour), Object.assign({ traversal: 'paint-up' }, gradientNote(bg)));
     add(textId, colourString(fg), { traversal: 'text-down', pair_with: bgId });
   };
 
@@ -379,7 +412,15 @@
         : qa('a', navEl).filter((a) => !(logoLink && (a === logoLink || a.contains(logoLink)))
           && !((parseColour(getComputedStyle(a).backgroundColor) || { a: 0 }).a > 0));
     const navLinks = navAll.filter((a) => isShown(a) && text(a));
-    const navHidden = pluginStore && navAll.length > 0 && navLinks.length === 0 && !q('.cl-nav-ready', headerEl);
+    // Folded away at this width by the page's own CSS (`display: none`, e.g. a store that hides its menu
+    // on phones): the menu shows NO links here, exactly as a reference's folded menu counts zero. Only a
+    // menu that is merely not revealed yet by its script stays unmeasurable. Before 26-09-2026 both read
+    // as unmeasurable, so a phone spec needed its nav rows written by hand.
+    const foldedByCss = (el) => {
+      for (let a = el; a && a !== document.body; a = a.parentElement) if (getComputedStyle(a).display === 'none') return true;
+      return false;
+    };
+    const navHidden = pluginStore && navAll.length > 0 && navLinks.length === 0 && !q('.cl-nav-ready', headerEl) && !foldedByCss(navEl);
     const hiddenWhy = `the menu has ${navAll.length} link(s) in the markup but none is visible — if the page shows them, it was measured before its script revealed them: let the page settle in a visible tab and run again`;
 
     const navText = navLinks.length ? textDown(navLinks[0]) : null;
@@ -397,7 +438,7 @@
       } else if (fg && contrast(fg, bg.colour) <= 1.5) {
         unmeasurable('header.background', `the wordmark ${colourString(fg)} on ${colourString(bg.colour)} is unreadable, so the background came off the wrong element — measure it by hand`, { traversal: 'paint-up' });
       } else {
-        add('header.background', colourString(bg.colour), { traversal: 'paint-up' });
+        add('header.background', colourString(bg.colour), Object.assign({ traversal: 'paint-up' }, gradientNote(bg)));
       }
       if (navHidden) unmeasurable('header.nav_color', hiddenWhy, { traversal: 'text-down', pair_with: 'header.background' });
       else add('header.nav_color', null);
@@ -482,8 +523,13 @@
     if (!pluginStore) {
       const copy = qa('*', footerEl).filter((el) => isShown(el) && el.children.length <= 3 && /©|copyright|all rights reserved|tous droits|derechos|جميع الحقوق/i.test(text(el)))
         .sort((a, b) => text(a).length - text(b).length)[0];
+      // The bar is a STRIP: at least 60% of the footer's width and a small part of its height. The height
+      // cap is relative — a fixed 140px failed on a phone-width window, where the © line and five legal
+      // links wrap into a 173px block and the climb stopped at the © line alone, leaving the links to be
+      // read as a fifth column (measured 26-09-2026, fassiano.com at 390 with a scrollbar).
+      const barMax = Math.max(140, box(footerEl).height * 0.35);
       for (let el = copy; el && el !== footerEl; el = el.parentElement) {
-        if (box(el).width >= box(footerEl).width * 0.6 && box(el).height <= 140) { bar = el; } else if (bar) { break; }
+        if (box(el).width >= box(footerEl).width * 0.6 && box(el).height <= barMax) { bar = el; } else if (bar) { break; }
       }
     }
     const inBar = (el) => !!(bar && bar.contains(el));
@@ -567,18 +613,46 @@
         && box(n.parentElement).left >= 0 && box(n.parentElement).right <= W
         && !['center', '-webkit-center'].includes(getComputedStyle(n.parentElement).textAlign)) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
     });
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const chain = [];
-      for (let a = n.parentElement; a && main.contains(a) && !edgeToEdge(a); a = a.parentElement) chain.push(a);
-      const sectionEl = chain[chain.length - 1];
-      if (!sectionEl || votes.has(sectionEl)) continue;
+    // One ballot: the text sits at the padding edge of the innermost element on its chain sharing the
+    // section's box; the section's width counts when a px cap holds any of those back.
+    const ballot = (sectionEl, chain) => {
       const s = box(sectionEl);
       const same = chain.filter((a) => Math.abs(box(a).left - s.left) <= 1 && Math.abs(box(a).right - s.right) <= 1);
       const cs = getComputedStyle(same[0]);
       const edge = rtl ? W - (box(same[0]).right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight))
         : box(same[0]).left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
       const held = same.find(heldBack);
-      votes.set(sectionEl, { gutter: round(edge), width: held ? round(box(held).width) : null });
+      return { gutter: round(edge), width: held ? round(box(held).width) : null };
+    };
+    const texts = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const chain = [];
+      for (let a = n.parentElement; a && main.contains(a) && !edgeToEdge(a); a = a.parentElement) chain.push(a);
+      const sectionEl = chain[chain.length - 1];
+      if (!sectionEl) continue;
+      texts.push({ n, chain });
+      if (!votes.has(sectionEl)) votes.set(sectionEl, ballot(sectionEl, chain));
+    }
+    // ONE WRAPPER HOLDING THE WHOLE PAGE — a boxed layout, where no section runs edge to edge — gives one
+    // ballot for the page, so "what most sections agree on" silently became "the wrapper". Found by
+    // structure, not by a class name: walk down through elements with a single child holding text to
+    // the first with several, and let each of those children vote. The wrapper stays on each chain, so
+    // a px cap on it still counts as the page's max width. Measured 26-09-2026: a plugin store's home
+    // page, ten sections voting as one.
+    if (votes.size === 1 && texts.length > 1) {
+      let fork = [...votes.keys()][0];
+      const childHolding = (parent, el) => { let c = el; while (c && c.parentElement !== parent) c = c.parentElement; return c; };
+      for (;;) {
+        const kids = new Set(texts.map((t) => childHolding(fork, t.n.parentElement)).filter(Boolean));
+        if (kids.size !== 1) break;
+        fork = [...kids][0];
+      }
+      const split = new Map();
+      for (const t of texts) {
+        const child = childHolding(fork, t.n.parentElement);
+        if (child && !split.has(child)) split.set(child, ballot(child, t.chain));
+      }
+      if (split.size > 1) { votes.clear(); split.forEach((v, k) => votes.set(k, v)); }
     }
     const mostCommon = (values) => {
       const count = new Map();
@@ -685,18 +759,89 @@
     else unmeasurable('plist1.card_ratio', 'the first card has no visible image');
   });
 
+  // ── the product page: read on a product page only, on both passes ─────────────────────────────
+  // Added 26-09-2026: these rows were written by hand on every build that had a reference, because
+  // nothing measured them. On a plugin store the gallery and title are read through their own markup;
+  // on a reference, through geometry — the largest image near the top, and the page's <h1>.
+  const productIds = ['product.gallery_ratio', 'product.gallery_width', 'product.title_font_size', 'typography.product_title_family',
+    'product.info_position', 'product.thumbs_position', 'product.gallery_background'];
+  section(productIds, () => {
+    const ldProduct = qa('script[type="application/ld+json"]').some((s) => /"@type"\s*:\s*\[?\s*"Product"/.test(s.textContent));
+    const ogType = (q('meta[property="og:type"]') || { content: '' }).content;
+    // A reference built with a page builder often declares nothing (measured: fassiano.com's product
+    // pages are plain Elementor pages, og:type "article"), so the agent can say it: CL_MEASURE_PAGE.
+    const isProduct = window.CL_MEASURE_PAGE === 'product' || (pluginStore ? !!q('.cl-product-page')
+      : ldProduct || /\bsingle-product\b/.test(document.body.className) || /product/i.test(ogType || ''));
+    if (!isProduct) { absent(productIds); return; }
+    const inChrome = (el) => [headerEl, footerEl, topbarEl].some((c) => c && c.contains(el));
+    const area = (el) => box(el).width * box(el).height;
+    const title = pluginStore ? q('.cl-product-page .cl-product-title') : qa('h1').find((h) => isShown(h) && !inChrome(h));
+    const gallery = pluginStore ? q('.cl-product-page #cl_gallery, .cl-product-page .cl_gallery') : null;
+    const main = pluginStore
+      ? (qa('.cl-gallery-slide.active img', gallery).find(isShown) || qa('img', gallery).filter(isShown).sort((a, b) => area(b) - area(a))[0])
+      : qa('img').filter((i) => isShown(i) && !inChrome(i) && box(i).top + window.scrollY < H * 2 && box(i).width >= W * 0.25)
+        .sort((a, b) => area(b) - area(a))[0];
+    if (!main) {
+      ['product.gallery_ratio', 'product.gallery_width', 'product.info_position', 'product.thumbs_position', 'product.gallery_background']
+        .forEach((id) => unmeasurable(id, 'no product image found near the top of the page'));
+    } else {
+      const m = box(main);
+      // From the image ITSELF: a transparent product photo shows the <img> element's own background
+      // (measured: a plugin store paints it on the img, a reference on a panel around it).
+      const bg = paintUp(main);
+      // The gallery's width is the PANEL the photo sits in — the box painting the background behind it —
+      // when that panel frames the photo (up to 1.6× its width); otherwise the photo itself. A framed
+      // gallery reads the frame on both passes; a bare photo reads the photo.
+      const panel = bg.painter && bg.painter.contains(main) && box(bg.painter).width <= m.width * 1.6 ? bg.painter : main;
+      px('product.gallery_width', box(panel).width);
+      add('product.gallery_ratio', Math.round((m.width / m.height) * 100) / 100, { tolerance: 0.02 });
+      if (bg.image) unmeasurable('product.gallery_background', `the image sits on an image or a picture background (${describe(bg.image)})`, { traversal: 'paint-up' });
+      else add('product.gallery_background', colourString(bg.colour), Object.assign({ traversal: 'paint-up' }, gradientNote(bg)));
+      // Where the title sits against the main image: right, left, below or above it.
+      if (title && isShown(title)) {
+        const t = box(title);
+        add('product.info_position', t.left >= m.right - 4 ? (rtl ? 'left' : 'right') : t.right <= m.left + 4 ? (rtl ? 'right' : 'left')
+          : t.top >= m.bottom - 4 ? 'below' : t.bottom <= m.top + 4 ? 'above' : 'overlay');
+      } else {
+        unmeasurable('product.info_position', 'no visible product title');
+      }
+      // Thumbnails: the other, smaller images of the gallery. On a reference, smaller images within one
+      // image-width of the main one that are not the title's block.
+      const thumbs = (pluginStore ? qa('img', gallery) : qa('img').filter((i) => {
+        const r = box(i);
+        return !inChrome(i) && r.width <= m.width * 0.4 && r.left >= m.left - m.width && r.right <= m.right + m.width
+          && r.top >= m.top - m.height && r.bottom <= m.bottom + m.height && !(title && title.parentElement && title.parentElement.contains(i));
+      })).filter((i) => i !== main && isShown(i) && box(i).width <= m.width * 0.4);
+      if (!thumbs.length) {
+        add('product.thumbs_position', 'none');
+      } else {
+        const tb = { top: Math.min(...thumbs.map((i) => box(i).top)), left: Math.min(...thumbs.map((i) => box(i).left)), right: Math.max(...thumbs.map((i) => box(i).right)) };
+        add('product.thumbs_position', tb.top >= m.bottom - 4 ? 'bottom' : tb.right <= m.left + 4 ? 'left' : tb.left >= m.right - 4 ? 'right' : 'top');
+      }
+    }
+    if (title && isShown(title)) {
+      const tt = textDown(title) || title;
+      const cs = getComputedStyle(tt);
+      px('product.title_font_size', parseFloat(cs.fontSize), 1);
+      add('typography.product_title_family', cs.fontFamily.split(',')[0].replace(/["']/g, '').trim().toLowerCase(), { traversal: 'text-down' });
+    } else {
+      unmeasurable('product.title_font_size', 'no visible product title');
+      unmeasurable('typography.product_title_family', 'no visible product title');
+    }
+  });
+
   // ── the spec ──────────────────────────────────────────────────────────────────────────────────
   const spec = {
     source: location.href,
     captured_at: today,
-    viewport: { width: W, height: H },
+    viewport: { width: VW, height: H },
     measured_with: 'browser',
     properties: rows,
   };
   const left = rows.filter((r) => r.reason && r.reason.kind === 'unmeasurable').map((r) => r.id);
-  const standard = (W === 1440 && H === 900) || (W === 390 && H === 844);
+  const standard = (VW === 1440 && H === 900) || (VW === 390 && H === 844);
   console.log(JSON.stringify(spec, null, 2));
-  console.info(`measure.js: ${rows.length} rows on a ${pluginStore ? 'plugin store' : 'reference'} at ${W}×${H}.`
+  console.info(`measure.js: ${rows.length} rows on a ${pluginStore ? 'plugin store' : 'reference'} at ${VW}×${H}.`
     + (standard ? '' : ' The checklist is measured at 1440×900 and 390×844 — resize and run again.')
     + (left.length ? `\nMeasure these by hand and replace them: ${left.join(', ')}` : ''));
   return spec;

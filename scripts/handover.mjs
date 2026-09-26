@@ -70,6 +70,10 @@
  *      cannot open. Reported to be told first, not as a failure: it is a host setting, and possibly
  *      deliberate before a launch.
  *
+ *  12. THE SILENT REVERSAL. A decision recorded as reversed must say what it was, why and when — a
+ *      reversal with no reason reads like a mistake on the next run. (Checked only where the blueprint
+ *      records it; see checkReversals().)
+ *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
  *
@@ -1383,9 +1387,46 @@ async function readFeatureDecisions(call, R, storeId) {
   const one = await call(`${path}/${row.id}`);
   if (one.status !== 200) return { error: `could not read blueprint #${row.id} (HTTP ${one.status})` };
   const doc = one.body?.blueprint ?? one.body?.data?.blueprint;
-  const features = doc?.decisions?.features?.value;
-  if (!features || typeof features !== 'object' || Array.isArray(features)) return { which, noFeatures: true };
-  return { which, features };
+  const decisions = doc?.decisions && typeof doc.decisions === 'object' ? doc.decisions : null;
+  const features = decisions?.features?.value;
+  if (!features || typeof features !== 'object' || Array.isArray(features)) return { which, noFeatures: true, decisions };
+  return { which, features, decisions };
+}
+
+/**
+ * 12 — THE SILENT REVERSAL. A decision changed after it was made — above all one taken to match the
+ * merchant's reference — must say what it was, why it changed and when (`reversed`, blueprint-format.md
+ * → "Reversing a decision"). Measured: an order summary switched OFF because the reference shows none
+ * was switched back ON the same day as a side effect of another fix, and nothing recorded it; the join
+ * it created with the form below went unchecked for days.
+ *
+ * What this can and cannot see: it checks every `reversed` the blueprint RECORDS. A setting flipped on
+ * the store without touching the blueprint leaves no trace here — that is what the rule in SKILL.md and
+ * the re-run browser pass are for.
+ */
+function checkReversals(decisions) {
+  const problems = [];
+  let checked = 0;
+  for (const [key, d] of Object.entries(decisions)) {
+    if (!d || typeof d !== 'object' || !('reversed' in d)) continue;
+    checked++;
+    const r = d.reversed;
+    const missing = [];
+    if (!r || typeof r !== 'object' || Array.isArray(r)) missing.push('an object { from, why, date }');
+    else {
+      if (!('from' in r)) missing.push('`from` (the value it had)');
+      if (typeof r.why !== 'string' || r.why.trim().length < 20) missing.push('`why` (a sentence, 20+ characters)');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(r.date ?? ''))) missing.push('`date` (YYYY-MM-DD)');
+    }
+    if (missing.length) {
+      problems.push(
+        `decision \`${key}\` is recorded as reversed, but its \`reversed\` lacks ${missing.join(', ')}.\n` +
+        '      A reversal with no reason reads, on the next run, exactly like a mistake — and a decision taken to\n' +
+        '      match the reference gets undone again. Write what it was, why it changed and when.'
+      );
+    }
+  }
+  return { checked, problems };
 }
 
 /**
@@ -1756,6 +1797,14 @@ async function main(base) {
     if (!features.problems.length && features.reconciled) {
       line(true, `the feature checklist matches the store (${features.reconciled} feature(s), ${recorded.which})`);
       passed.push('the feature checklist matches the store');
+    }
+  }
+  if (recorded.decisions) {
+    const reversals = checkReversals(recorded.decisions);
+    problems.push(...reversals.problems);
+    if (reversals.checked && !reversals.problems.length) {
+      line(true, `every reversed decision says what it was, why and when (${reversals.checked})`);
+      passed.push('every reversed decision is recorded with its reason');
     }
   }
 

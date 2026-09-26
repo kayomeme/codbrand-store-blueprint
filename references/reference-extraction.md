@@ -205,7 +205,8 @@ the reference and on what you built.
   by its geometry instead.
 - **Measure by hand only what it returns `unmeasurable`**, and replace those rows in the file. On a
   reference that always includes the review-card and product-card rows (every theme builds them
-  differently), plus anything painted with an image or a gradient.
+  differently), plus anything painted with an image. A background of gradients only is read as its
+  first colour stop, on both passes.
 - **A row you measure by hand must follow the definitions in the script's header** — how footer
   columns are counted, which side a gutter is read from, what the page's max width is. A value measured
   some other way does not compare, and `match.mjs` cannot tell.
@@ -256,9 +257,25 @@ so these rows are where a design left at its shipped look gets caught.
 | `plist1.button_kind` · `plist1.badge_position` | `button_kind`: `text`, `icon` or `none`; `badge_position`: `image` (over the photo), `inline` or `none` |
 | `plist1.columns` · `plist1.card_ratio` | the cards a visitor sees side by side — a carousel's cards scrolled out of view do not count; the first card's image, width over height |
 
-**Beyond these, the gate is only as wide as what you write into the spec.** The product page, the
-cart and the menus are not listed — nothing stops you adding rows for them, and on a reference where
-they are the point, you should. Exit 0 means *the rows you wrote agree*, never *the store matches*.
+**On a product page, the product rows** — run `measure.js` on one product page of each, the same
+product where you can. A plugin store's product page is recognised by itself; on a reference that
+declares nothing (a page builder's product page), set `window.CL_MEASURE_PAGE = 'product'` first.
+
+| id | notes |
+|---|---|
+| `product.gallery_width` · `product.gallery_ratio` | the gallery PANEL the main photo sits in (the box painting its background), or the photo itself when nothing frames it; the photo's width over height |
+| `product.gallery_background` | the paint behind the main photo, starting at the photo itself — a transparent photo shows its own element's background |
+| `product.info_position` · `product.thumbs_position` | where the title sits against the main photo: `right`, `left`, `below`, `above`; the thumbnails: `bottom`, `left`, `right`, `top` or `none` |
+| `product.title_font_size` · `typography.product_title_family` | the title's size; its first font family, lower-case |
+
+**Measure both sides in the SAME browser mode** — a desktop window with its scrollbar, or a phone.
+The same page wraps text differently at 390 in a desktop window (a scrollbar takes ~15px) than on a
+phone, so heights and gutters differ for no real reason when the two passes are taken in different
+modes.
+
+**Beyond these, the gate is only as wide as what you write into the spec.** The cart and the menus
+are not listed — nothing stops you adding rows for them, and on a reference where they are the point,
+you should. Exit 0 means *the rows you wrote agree*, never *the store matches*.
 
 ## The spec shape
 

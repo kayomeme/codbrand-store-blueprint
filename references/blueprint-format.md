@@ -72,6 +72,34 @@ decisions.
 if acceptance promoted everything then `inferred` would only exist between generation and approval —
 the field would stop meaning anything and the skill could never improve a store it built.
 
+### Reversing a decision
+
+**A decision that matches the merchant's reference is not undone as a side effect of another fix.**
+Reversing any decision is a decision of its own: change its `value`, keep its `status` honest (it
+becomes `chosen` only if the merchant chose the new value — a fix you made stays `inferred`), and
+record what it was:
+
+```jsonc
+"order_summary": {
+  "status": "inferred",
+  "why":    "shown before the form; the order list helps a shopper who adds a second size",
+  "value":  "on",
+  "reversed": {
+    "from": "off",
+    "why":  "was off to match the reference (it shows no order list); switched back on because a cart holding two sizes hid the second one",
+    "date": "2026-09-26"
+  }
+}
+```
+
+When a decision was taken **to match the reference**, say so in its `why` and name what the reference
+shows, so a later fix can see what it would be undoing. A reversal also re-opens the page it touches:
+re-run the browser pass there (`SKILL.md` → "Phase 10's browser pass").
+
+`handover.mjs` refuses a `reversed` without `from`, a `why` of a real sentence, and a `date`. It checks
+only what the blueprint records: a setting flipped on the store without touching the blueprint leaves
+no trace it can read — which is why the rule is yours to keep.
+
 ### `value` must be self-contained
 
 Store the **resolved output**, never only the reasoning that produced it.
