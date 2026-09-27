@@ -237,16 +237,20 @@ multi-store install, add and point rather than edit.
 **Media dedupes by content hash**, so re-uploading the same bytes is safe and free. When you upload an
 image you generated, send `"source_type": "trainedAlgorithmicMedia"` — it is recorded with the image.
 
-**What you may remove — a hard rule.** Delete or replace only images YOU added (uploaded through the
-API). Any other image — one the merchant added — only when the merchant has asked you to remove or
-replace THAT image; then, and only then, send `"merchant_confirmed": true`. Never set it to clean up on
-your own initiative, and never to get past a refusal.
+**What you may remove — a hard rule.** Delete or replace only files YOU added (uploaded through the
+API) — images, videos, audio, PDFs. Any other file — one the merchant added — only when the merchant has
+asked you to remove or replace THAT file; then, and only then, send `"merchant_confirmed": true`. Never
+set it to clean up on your own initiative, and never to get past a refusal.
 
-`GET media/{id}/usage` shows where an image is used. `DELETE media/{id}` refuses while anything uses it
+`GET media/{id}/usage` shows where a file is used. `DELETE media/{id}` refuses while anything uses it
 (point those places elsewhere first — a merchant's request does not override this) and needs the key's
-`media` delete grant. `PUT media/{id}/file` swaps the picture inside an image when the new one has the
-same format and size, so a logo iteration of the same size needs no re-linking. See
-`/docs/media_usage_and_delete`.
+`media` delete grant. DELETE works for images, videos, audio files and PDFs; any other file type is
+refused — the merchant deletes it in wp-admin. `PUT media/{id}/file` swaps the picture inside an image
+when the new one has the same format and size, so a logo iteration of the same size needs no
+re-linking. Only an image can be replaced in place. To change a video, audio file or PDF, upload the new
+file (new URL), point every place in its usage at it, then delete the old one. A video, audio file or
+PDF uploaded before the store's plugin reached 1.2.825 answers `indexed: false` until
+`POST media/usage-rebuild` reports done. See `/docs/media_usage_and_delete`.
 
 **Some things have no door — but CHECK before you say so.** A contact form is the known one: you can
 build a Contact page, but it lists WhatsApp / phone / email rather than a working form. Say so rather
