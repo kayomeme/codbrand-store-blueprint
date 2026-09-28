@@ -25,7 +25,11 @@
  *   A background of gradients only (no image) reads as its FIRST colour stop, on both passes, with a
  *   note saying so.
  * - A store built with the plugin is read through its own containers and classes. A reference site
- *   is read through <header>, <footer>, <nav>, links to the home page, and page geometry.
+ *   is read through <header>, <footer>, <nav>, links to the home page (a locale root like /en-ae
+ *   included), and page geometry. With no landmarks at all, the header is the band holding the logo,
+ *   its menu the first row of three or more short links, and the footer the block around the © line.
+ *   It reads the page as it is laid out NOW: run it in the tab in front, at rest at the top — a header
+ *   that changes on scroll can be caught half-way in a background tab.
  * - A row it cannot resolve with confidence comes back as `"value": null` with
  *   `"reason": { "kind": "unmeasurable" }` and what it tried. match.mjs reports such a row and never
  *   passes it: measure that row by hand and replace it in the file.
@@ -34,8 +38,14 @@
  *   differently, so on a reference they come back unmeasurable, for you to measure by hand.
  *
  * DEFINITIONS the checklist leaves open, fixed here so both passes agree:
- * - `footer.columns` counts column groups: one per heading, plus a brand block with no heading of
- *   its own. `footer.links_per_column` lists the text links in each, left to right.
+ * - `footer.columns` counts column groups: one per heading (a short title, 40 characters or fewer),
+ *   plus a brand block with no heading of its own. `footer.links_per_column` lists the text links in
+ *   each, left to right.
+ * - `header.trailing_icons` names the icon controls after the menu, in reading order — on a header in
+ *   two rows, those after the logo on its row. An icon may be an svg, an image or an icon font; the
+ *   label counted against a control's 20 characters is the one a visitor sees.
+ * - `product.gallery_width` of a grid of equal photos side by side is the grid's width, and such a
+ *   grid has no thumbnails. Thumbnails are a set of same-size images of 40px or more by the photo.
  * - `reviews.card_border` is the card's top border (`none` when it has none), `reviews.card_padding`
  *   its left padding.
  * - `header.height` excludes a topbar that sits inside the reference's <header>.
@@ -48,7 +58,9 @@
  * - `page.max_width` and `page.gutter` are what most sections of the page agree on. A section is the
  *   outermost block around its first left-aligned text that does not run edge to edge; its gutter is
  *   the padding edge that text sits at, and its max width is its width when a px cap holds it back
- *   (`null` when none does — a phone, a fluid page). A centred title has no vote on either.
+ *   (`null` when none does — a phone, a fluid page). A centred title has no vote on either, nor does
+ *   one slide or card of a row, nor a caption laid over an image. A block running edge to edge whose
+ *   text is held in by a left padding votes that padding as a gutter, and no max width.
  *
  * No dependencies. It only reads the page: it scrolls to the top first, as a visitor lands, and scrolls
  * down and back once to see whether a sticky header stays.
@@ -145,10 +157,14 @@
   const gradientNote = (bg) => (bg.gradient ? { note: `a gradient on ${describe(bg.gradient)}: its first colour stop` } : {});
 
   /** Rule 1, text: the deepest element holding visible text. */
-  const textDown = (root) => {
+  // `unpinned` skips text on a fixed layer inside the root — a "back to top" button kept in the footer
+  // markup floats over the page, and appears only after a scroll (measured 28-09-2026: footer gutter 1368).
+  const pinned = (el, root) => { for (let a = el; a && a !== root; a = a.parentElement) if (getComputedStyle(a).position === 'fixed') return true; return false; };
+  const textDown = (root, unpinned = false) => {
     if (!root) return null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.nodeValue.trim().length > 1 && isShown(n.parentElement)) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
+      acceptNode: (n) => (n.nodeValue.trim().length > 1 && isShown(n.parentElement) && !(unpinned && pinned(n.parentElement, root)))
+        ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
     });
     const n = walker.nextNode();
     return n ? n.parentElement : null;
@@ -171,23 +187,35 @@
     return textDown(band);
   };
 
+  // The home page is "/" — or a LOCALE ROOT: one or two language/country segments such as /en-ae, /ae-en/
+  // or /ae/en/. Measured 28-09-2026: three stores linked their logo to exactly those, and with "/" alone
+  // a 39px sister-brand icon in the top strip was taken for the logo.
+  const LOCALE = /^[a-z]{2}(?:[-_][a-z]{2})?$/i;
   const isHomeLink = (a) => {
     try {
       const u = new URL(a.href, location.href);
-      return u.origin === location.origin && (u.pathname === '/' || u.pathname === '') && !u.hash;
+      const parts = u.pathname.split('/').filter(Boolean);
+      return u.origin === location.origin && !u.hash && parts.length <= 2 && parts.every((p) => LOCALE.test(p));
     } catch (e) {
       return false;
     }
   };
   const SOCIAL = /(facebook|fb\.com|instagram|tiktok|twitter|x\.com|youtube|youtu\.be|pinterest|linkedin|snapchat|wa\.me|whatsapp|threads\.net|telegram|t\.me)/i;
-  /** What a header control says it is — from its label, title, class, id or link. */
+  /** What a header control says it is — from its label, title, class, id, link, its own (often
+   *  visually hidden) text, or its icon font's class: "Search", "Wishlist", "icon-heart". */
   const nameOf = (el) => {
-    const s = [el.getAttribute('aria-label'), el.title, el.className, el.id, el.getAttribute('href'),
-      el.getAttribute('data-open-cart') ? 'cart' : '', el.getAttribute('data-open-search') ? 'search' : ''].join(' ').toLowerCase();
+    const glyph = el.querySelector('i[class], [class*="icon"]');
+    return kindOf([el.getAttribute('aria-label'), el.title, el.className, el.id, el.getAttribute('href'), (el.textContent || '').slice(0, 60),
+      glyph ? String(glyph.className) : '',
+      el.getAttribute('data-open-cart') ? 'cart' : '', el.getAttribute('data-open-search') ? 'search' : ''].join(' '));
+  };
+  const kindOf = (words) => {
+    const s = words.toLowerCase();
     if (/search|recherche|chercher|بحث/.test(s)) return 'search';
     if (/cart|bag|basket|panier|sac|سلة/.test(s)) return 'cart';
-    if (/account|user|login|profile|compte|connexion|حساب/.test(s)) return 'account';
-    if (/wish|heart|favou?r|favori/.test(s)) return 'wishlist';
+    // Wishlist before account: a wishlist often lives under the account ("/my-account/wishlist").
+    if (/wish|heart|favou?r|favori|my list/.test(s)) return 'wishlist';
+    if (/account|user|login|log in|sign in|sign-in|profile|customer|compte|connexion|حساب/.test(s)) return 'account';
     if (/menu|burger|hamburger|toggle|flexnav|drawer/.test(s)) return 'menu';
     return 'other';
   };
@@ -310,17 +338,55 @@
     }
     return band;
   };
+  // A reference's LOGO: the home link near the top holding an image — the largest, so a small sister-brand
+  // or flag icon never wins — else the first home link there.
+  const topHomeLinks = pluginStore ? [] : qa('a').filter((a) => isShown(a) && isHomeLink(a) && box(a).top < H / 2);
+  const area = (el) => box(el).width * box(el).height;
+  const pageLogo = topHomeLinks.filter((a) => q('img, svg', a)).sort((a, b) => area(b) - area(a))[0] || topHomeLinks[0] || null;
+  // The band around the logo: its widest ancestor that still starts at the top and is the height of a
+  // header, not the page. Used when the page has no <header> at all (measured: a store built entirely of
+  // <div>s, whose only <nav> elements were hidden dropdowns).
+  const bandAroundLogo = (logo) => {
+    let band = null;
+    for (let el = logo; el && el !== document.body; el = el.parentElement) {
+      const r = box(el);
+      if (r.height > 260 || r.top < -1) break;
+      if (r.width >= W * 0.9) band = el;
+    }
+    return band;
+  };
+  const headers = pluginStore ? [] : qa('header, [role="banner"]').filter(isShown);
   const headerEl = pluginStore
     ? (q('.cl-header-container header.cl-site-header') || q('.cl-header-container'))
-    : qa('header, [role="banner"]').find(isShown) || bandAroundTopMenu();
+    // Several <header>s (or none): the one holding the logo wins over the first in the page.
+    : (pageLogo && headers.find((h) => h.contains(pageLogo))) || headers[0] || (pageLogo && bandAroundLogo(pageLogo)) || bandAroundTopMenu();
+  // No <footer>: the bottom block holding the copyright line — the widest ancestor of it that leaves the
+  // header out and is a footer's height, not the page's.
+  const footerAroundCopyright = () => {
+    const pageH = document.documentElement.scrollHeight;
+    const copy = qa('body *').filter((el) => el.children.length <= 3 && isShown(el) && box(el).top + window.scrollY > pageH * 0.5
+      && /©|copyright|all rights reserved|tous droits|derechos|جميع الحقوق/i.test(text(el)))
+      .sort((a, b) => text(a).length - text(b).length)[0];
+    let block = null;
+    for (let el = copy; el && el !== document.body; el = el.parentElement) {
+      if ((headerEl && el.contains(headerEl)) || box(el).height > pageH * 0.6) break;
+      if (box(el).width >= W * 0.9) block = el;
+    }
+    return block;
+  };
   const footerEl = pluginStore
     ? (q('.cl-footer-container footer.cl-site-footer') || q('.cl-footer-container'))
-    : qa('footer, [role="contentinfo"]').filter(isShown).pop() || null;
+    : qa('footer, [role="contentinfo"]').filter(isShown).pop() || footerAroundCopyright();
 
   const overlays = qa('body *').filter((el) => {
     const cs = getComputedStyle(el);
     if (cs.position !== 'fixed' || !isShown(el)) return false;
     if ((headerEl && (headerEl.contains(el) || el.contains(headerEl))) || el.closest('.cl-topbar-container')) return false;
+    // A layer that paints nothing — no background, image, border or visible text or media — covers
+    // nothing: measured, a transparent full-screen wrapper stopped the run on a store.
+    const paintsSomething = (parseColour(cs.backgroundColor) || { a: 0 }).a > 0.05 || cs.backgroundImage !== 'none'
+      || parseFloat(cs.borderTopWidth) > 0 || text(el) || qa('img, video, canvas, iframe, svg', el).some(isShown);
+    if (!paintsSomething) return false;
     const r = box(el);
     const visibleArea = Math.max(0, Math.min(r.right, W) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, H) - Math.max(r.top, 0));
     return visibleArea >= 0.25 * W * H;
@@ -336,10 +402,13 @@
   // ── topbar ────────────────────────────────────────────────────────────────────────────────────
   const logoLink = (() => {
     if (pluginStore) return q('.logo-container a', headerEl);
-    // The home link; failing that — a one-page site's logo links to its own top, #accueil — the first
-    // header link holding an image that does not name itself as a control.
+    // The home link holding an image (the largest), else the first home link; failing that — a one-page
+    // site's logo links to its own top, #accueil — the LARGEST header link holding an image that does not
+    // name itself as a control (the first one was a 39px sister-brand icon on one store).
+    if (pageLogo && (!headerEl || headerEl.contains(pageLogo))) return pageLogo;
     const links = qa('a', headerEl || document.body).filter(isShown);
-    return links.find(isHomeLink) || (headerEl && links.find((a) => q('img, svg', a) && nameOf(a) === 'other')) || null;
+    return links.filter(isHomeLink).sort((a, b) => (q('img, svg', b) ? 1 : 0) - (q('img, svg', a) ? 1 : 0))[0]
+      || (headerEl && links.filter((a) => q('img, svg', a) && nameOf(a) === 'other').sort((a, b) => area(b) - area(a))[0]) || null;
   })();
   const topbarIds = ['topbar.present', 'topbar.height', 'topbar.background', 'topbar.text_color', 'topbar.font_size',
     'topbar.font_weight', 'topbar.text_transform', 'topbar.text_align', 'topbar.message_count', 'topbar.message_is_link', 'topbar.arrows'];
@@ -403,14 +472,45 @@
     // script has measured it and marked it .cl-nav-ready, so a page measured before that (or in a
     // background tab, where the script waits) shows none of it. Anywhere else, a menu with no link
     // showing is a menu folded away at this width, and it counts zero.
-    const navEl = pluginStore
-      ? q('nav.main-nav', headerEl)
-      : (headerEl.tagName === 'NAV' ? headerEl : qa('nav', headerEl).sort((a, b) => qa('a', b).length - qa('a', a).length)[0]) || null;
-    // A reference's <nav> can also hold the logo and a filled call-to-action button; the menu is neither.
-    const navAll = !navEl ? []
-      : pluginStore ? qa('li:not(.cl_hidden_flexnav) > a', navEl)
-        : qa('a', navEl).filter((a) => !(logoLink && (a === logoLink || a.contains(logoLink)))
-          && !((parseColour(getComputedStyle(a).backgroundColor) || { a: 0 }).a > 0));
+    // A reference's MENU: the first ROW of at least three visible short text links in the header, at or
+    // below the logo and outside the topbar — inside a <nav> or not. Measured 28-09-2026: one store's
+    // menu was <a> buttons in <div>s while its only <nav> elements were hidden dropdowns; another had a
+    // white menu row above a black category bar, and "the <nav> with the most links" picked the bar. The
+    // logo, a filled call-to-action button and an icon control (cart, account…) are never menu items.
+    const referenceMenu = () => {
+      const logoTop = logoLink && isShown(logoLink) ? box(logoLink).top : -Infinity;
+      const menuItem = (a) => isShown(a) && text(a) && text(a).length <= 40
+        && !(logoLink && (a === logoLink || a.contains(logoLink) || logoLink.contains(a)))
+        // By the link's centre: a menu of full-height buttons starts above the logo (measured 28-09-2026:
+        // 80px buttons from y=46, the logo from y=62), and every one was dropped by its top.
+        && !(topbarEl && topbarEl.contains(a)) && (box(a).top + box(a).bottom) / 2 >= logoTop - 10
+        && !((parseColour(getComputedStyle(a).backgroundColor) || { a: 0 }).a > 0)
+        && !(q('svg, img', a) && (nameOf(a) !== 'other' || text(a).length <= 2));
+      // A visible <nav> first — even of one link — and of several, the TOP-MOST, not the fullest.
+      const navs = (headerEl.tagName === 'NAV' ? [headerEl] : qa('nav', headerEl))
+        .map((n) => qa('a', n).filter(menuItem)).filter((links) => links.length)
+        .sort((x, y) => Math.min(...x.map((a) => box(a).top)) - Math.min(...y.map((a) => box(a).top)));
+      if (navs.length) return navs[0].sort((a, b) => startGap(a) - startGap(b));
+      // No usable <nav>: the first row of at least three menu links, wherever they sit.
+      const items = qa('a', headerEl).filter(menuItem);
+      const lines = [];
+      for (const a of items) {
+        const c = (box(a).top + box(a).bottom) / 2;
+        let line = lines.find((l) => Math.abs(l.c - c) <= 12);
+        if (!line) lines.push(line = { c, links: [] });
+        line.links.push(a);
+      }
+      const row = lines.filter((l) => l.links.length >= 3).sort((x, y) => x.c - y.c)[0];
+      return row ? row.links.sort((a, b) => startGap(a) - startGap(b)) : [];
+    };
+    const referenceLinks = pluginStore ? [] : referenceMenu();
+    const commonAncestor = (els) => {
+      let c = els[0] ? els[0].parentElement : null;
+      while (c && !els.every((e) => c.contains(e))) c = c.parentElement;
+      return c && c !== headerEl ? c : null;
+    };
+    const navEl = pluginStore ? q('nav.main-nav', headerEl) : commonAncestor(referenceLinks);
+    const navAll = pluginStore ? (navEl ? qa('li:not(.cl_hidden_flexnav) > a', navEl) : []) : referenceLinks;
     const navLinks = navAll.filter((a) => isShown(a) && text(a));
     // Folded away at this width by the page's own CSS (`display: none`, e.g. a store that hides its menu
     // on phones): the menu shows NO links here, exactly as a reference's folded menu counts zero. Only a
@@ -479,15 +579,41 @@
 
     // Icon controls after the nav in reading order — to its right, or to its left on a right-to-left
     // page — named by what they say they are. With no nav link showing (a phone folds the menu into a
-    // toggle), the nav's own edge, or the logo's, is where they start.
+    // toggle), the nav's own edge, or the logo's, is where they start. A header in TWO ROWS (logo and
+    // icons above, the menu alone below) keeps its icons by ROW: on the logo's row, after the logo.
+    // Measured 28-09-2026: a two-row header lost all five icons to the one-row rule.
     const endGap = (el) => (rtl ? W - box(el).left : box(el).right);
     const navEnd = navLinks.length ? Math.max(...navLinks.map(endGap))
       : (navEl && isShown(navEl) && navEl !== headerEl) ? endGap(navEl)
         : (logoLink && isShown(logoLink)) ? endGap(logoLink) : startGap(headerEl);
-    // An icon control may carry a short label or a count ("Cart 2"); a plain text link has no icon.
-    const icons = qa('a, button', headerEl).filter((el) => isShown(el) && q('svg, img', el) && text(el).length <= 20
-      && startGap(el) >= navEnd - 2 && !(logoLink && (el === logoLink || logoLink.contains(el)))
-      && !(navEl && navEl !== headerEl && navEl.contains(el)))
+    const sameRow = (el, ref) => {
+      const a = box(el), b = box(ref);
+      return Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) >= Math.min(a.height, b.height) * 0.5;
+    };
+    const logoShown = logoLink && isShown(logoLink);
+    const logoRowApart = logoShown && navLinks.length > 0 && !navLinks.some((n) => sameRow(n, logoLink));
+    const trailing = (el) => (navLinks.length && navLinks.some((n) => sameRow(el, n)) && startGap(el) >= navEnd - 2)
+      || (logoRowApart && sameRow(el, logoLink) && startGap(el) >= endGap(logoLink) - 2)
+      || (!navLinks.length && startGap(el) >= navEnd - 2);
+    // An icon control may carry a short label or a count ("Cart 2"); a plain text link has no icon. The
+    // icon may be an icon font (<i class="icon-heart">), and the control a block that opens a menu on
+    // hover with no link of its own — kept when its id or class names what it is ("user-menu-account").
+    const ICON = 'svg, img, i, [class*="icon"]';
+    const CONTROL = ['search', 'cart', 'account', 'wishlist'];
+    const hoverControls = qa('div, span, li', headerEl).filter((el) => CONTROL.includes(kindOf(`${el.id} ${el.className}`)) && box(el).width <= 200 && box(el).height <= 80
+      && !qa('a, button', el).some(isShown));
+    // The label counted is the one a visitor sees: a screen-reader label (a 1px box) can hold anything
+    // (measured 28-09-2026: "inline-block ml-1 no-underline … Cart", 62 characters, dropped the cart).
+    const seenText = (el) => {
+      const parts = [];
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (box(n.parentElement).width > 1 && box(n.parentElement).height > 1) parts.push(n.nodeValue);
+      return parts.join(' ').replace(/\s+/g, ' ').trim();
+    };
+    const icons = [...qa('a, button, [role="button"]', headerEl), ...hoverControls].filter((el) => isShown(el) && q(ICON, el) && seenText(el).length <= 20
+      && trailing(el) && !(logoLink && (el === logoLink || logoLink.contains(el))) && !navLinks.includes(el)
+      // On a reference the menu's block may also hold the icons (one flex row): only its links are menu.
+      && !(pluginStore && navEl && navEl !== headerEl && navEl.contains(el)))
       .filter((el, i, all) => !all.some((o) => o !== el && o.contains(el)))
       .sort((a, b) => startGap(a) - startGap(b));
     add('header.trailing_icons', icons.map(nameOf));
@@ -534,14 +660,16 @@
     }
     const inBar = (el) => !!(bar && bar.contains(el));
 
-    const mainText = textDown(pluginStore ? (q('.cl-footer-main', footerEl) || footerEl) : footerEl);
-    pair('footer.background', 'footer.text_color', mainText && !inBar(mainText) ? mainText : textDown(footerEl));
+    const mainText = textDown(pluginStore ? (q('.cl-footer-main', footerEl) || footerEl) : footerEl, true);
+    pair('footer.background', 'footer.text_color', mainText && !inBar(mainText) ? mainText : textDown(footerEl, true));
     px('footer.height', box(footerEl).height, 8);
 
     // A social ICON: small, and pointing at a network. A text link to WhatsApp ("Contact us") is a link.
     const isSocial = (a) => (SOCIAL.test(a.href || '') || !!a.closest('.cl-footer-social-links')) && box(a).width <= 64 && box(a).height <= 64;
+    // A column title is short: a heading tag holding a sentence ("Find out first. Get our emails…") is a
+    // newsletter or legal note, not a column (measured 28-09-2026).
     let headings = qa(pluginStore ? '.footer-menu-title, .contact-info-title' : 'h2, h3, h4, h5, h6, [role="heading"]', footerEl)
-      .filter((h) => isShown(h) && text(h) && !inBar(h));
+      .filter((h) => isShown(h) && text(h) && !inBar(h) && (pluginStore || text(h).length <= 40));
     if (!pluginStore && !headings.length) {
       // No heading tags (page builders often use none): a column's title is the short first text of a
       // block holding two or more links, when that text is not itself a link.
@@ -557,7 +685,9 @@
       }
       return col;
     };
-    const brand = pluginStore ? q('.footer-brand-col', footerEl) : (qa('a', footerEl).find((a) => isShown(a) && isHomeLink(a) && q('img, svg', a)) || null);
+    // Outside the bottom bar: a legal-bar image link can point at the home page too (measured: "Customer
+    // Rights", linking to the store's locale root).
+    const brand = pluginStore ? q('.footer-brand-col', footerEl) : (qa('a', footerEl).find((a) => isShown(a) && isHomeLink(a) && q('img, svg', a) && !inBar(a)) || null);
     const brandBlock = brand && isShown(brand) && !headings.some((h) => columnOf(h).contains(brand)) ? columnOf(brand) : null;
     add('footer.brand_block', !!brandBlock);
 
@@ -624,14 +754,40 @@
       const held = same.find(heldBack);
       return { gutter: round(edge), width: held ? round(box(held).width) : null };
     };
+    // Neither votes: text laid ON something (a caption on a hero image, in an absolutely positioned
+    // layer), nor one card of a ROW of three or more side by side (a slider, a card grid) — a row's first
+    // card starts wherever the row starts. Measured 28-09-2026: a slider flush with the window's edge,
+    // each 394px slide voting as a section, gave the page a 394px width and a 0 gutter.
+    const layered = (chain) => chain.some((a) => ['absolute', 'fixed'].includes(getComputedStyle(a).position));
+    const inCardRow = (el) => {
+      const r = box(el);
+      if (!el.parentElement) return false;
+      return Array.from(el.parentElement.children).filter((s) => {
+        if (s === el || !isShown(s)) return false;
+        const o = box(s);
+        return Math.min(o.bottom, r.bottom) - Math.max(o.top, r.top) >= Math.min(o.height, r.height) * 0.5
+          && (o.left >= r.right - 1 || o.right <= r.left + 1);
+      }).length >= 2;
+    };
+    // The chain starts at the text's BLOCK: an inline link or <strong> starts wherever the line puts it
+    // (measured 28-09-2026: a link mid-sentence voted a 920px gutter). A block that itself runs edge to
+    // edge, its text held in by a left padding, votes that padding as a gutter and no width.
+    const flat = (el) => ['inline', 'contents'].includes(getComputedStyle(el).display);
+    const padStart = (el) => parseFloat(getComputedStyle(el)[rtl ? 'paddingRight' : 'paddingLeft']);
     const texts = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      let block = n.parentElement;
+      while (block && block !== main && flat(block)) block = block.parentElement;
       const chain = [];
-      for (let a = n.parentElement; a && main.contains(a) && !edgeToEdge(a); a = a.parentElement) chain.push(a);
+      for (let a = block; a && main.contains(a) && !edgeToEdge(a); a = a.parentElement) chain.push(a);
+      const padded = !chain.length && block && padStart(block) > 0;
+      if (padded) chain.push(block);
       const sectionEl = chain[chain.length - 1];
-      if (!sectionEl) continue;
-      texts.push({ n, chain });
-      if (!votes.has(sectionEl)) votes.set(sectionEl, ballot(sectionEl, chain));
+      if (!sectionEl || layered(chain) || inCardRow(sectionEl)) continue;
+      const full = [];
+      for (let a = n.parentElement; a && a !== sectionEl.parentElement; a = a.parentElement) full.push(a);
+      texts.push({ n, chain: full });
+      if (!votes.has(sectionEl)) votes.set(sectionEl, padded ? { gutter: ballot(sectionEl, chain).gutter, width: undefined } : ballot(sectionEl, chain));
     }
     // ONE WRAPPER HOLDING THE WHOLE PAGE — a boxed layout, where no section runs edge to edge — gives one
     // ballot for the page, so "what most sections agree on" silently became "the wrapper". Found by
@@ -639,7 +795,7 @@
     // the first with several, and let each of those children vote. The wrapper stays on each chain, so
     // a px cap on it still counts as the page's max width. Measured 26-09-2026: a plugin store's home
     // page, ten sections voting as one.
-    if (votes.size === 1 && texts.length > 1) {
+    if (votes.size === 1 && texts.length > 1 && [...votes.values()][0].width !== undefined) {
       let fork = [...votes.keys()][0];
       const childHolding = (parent, el) => { let c = el; while (c && c.parentElement !== parent) c = c.parentElement; return c; };
       for (;;) {
@@ -662,7 +818,8 @@
       return best;
     };
     const ballots = Array.from(votes.values());
-    const maxWidth = ballots.length ? mostCommon(ballots.map((v) => v.width)) : null;
+    const widths = ballots.map((v) => v.width).filter((w) => w !== undefined);
+    const maxWidth = widths.length ? mostCommon(widths) : null;
     if (maxWidth !== null) px('page.max_width', maxWidth, 8); else add('page.max_width', null);
     const gutter = ballots.length ? mostCommon(ballots.map((v) => v.gutter)) : null;
     if (gutter !== null) px('page.gutter', gutter); else unmeasurable('page.gutter', 'no left-aligned text in the main area');
@@ -777,10 +934,35 @@
     const area = (el) => box(el).width * box(el).height;
     const title = pluginStore ? q('.cl-product-page .cl-product-title') : qa('h1').find((h) => isShown(h) && !inChrome(h));
     const gallery = pluginStore ? q('.cl-product-page #cl_gallery, .cl-product-page .cl_gallery') : null;
+    // Only images mostly ON SCREEN: a carousel parks its other slides beside the window, "visible" to the
+    // DOM. Measured 28-09-2026: four 708px slides at x = -622, 86, 794, 1502, and an off-screen one won.
+    // Seen means inside the window AND inside every clipping box around it: in a wider window the next
+    // slide is on screen but hidden by the carousel's overflow, and would pass for a second photo.
+    const onScreen = (el) => {
+      const r = box(el);
+      if (!r.width) return false;
+      let left = Math.max(r.left, 0), right = Math.min(r.right, W);
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX !== 'visible') { left = Math.max(left, box(a).left); right = Math.min(right, box(a).right); }
+      }
+      return right - left >= r.width * 0.9;
+    };
+    const candidates = pluginStore ? [] : qa('img').filter((i) => isShown(i) && onScreen(i) && !inChrome(i)
+      && box(i).top + window.scrollY < H * 2 && box(i).width >= 120);
     const main = pluginStore
       ? (qa('.cl-gallery-slide.active img', gallery).find(isShown) || qa('img', gallery).filter(isShown).sort((a, b) => area(b) - area(a))[0])
-      : qa('img').filter((i) => isShown(i) && !inChrome(i) && box(i).top + window.scrollY < H * 2 && box(i).width >= W * 0.25)
-        .sort((a, b) => area(b) - area(a))[0];
+      : candidates.sort((a, b) => area(b) - area(a))[0];
+    // A PHOTO GRID (2×2 tiles…): other images the size of the largest one, next to it. The gallery is then
+    // their smallest common block, and it has no thumbnails. Measured: a 2×2 grid of 272px tiles, which the
+    // old "a quarter of the page wide" floor turned into "no product image found".
+    const peers = pluginStore || !main ? [] : candidates.filter((i) => i !== main
+      && Math.abs(box(i).width - box(main).width) <= 4 && Math.abs(box(i).height - box(main).height) <= 4
+      && Math.abs(box(i).left - box(main).left) <= box(main).width * 2 && Math.abs(box(i).top - box(main).top) <= box(main).height * 2);
+    let grid = null;
+    if (peers.length) {
+      grid = main.parentElement;
+      while (grid && !peers.every((p) => grid.contains(p))) grid = grid.parentElement;
+    }
     if (!main) {
       ['product.gallery_ratio', 'product.gallery_width', 'product.info_position', 'product.thumbs_position', 'product.gallery_background']
         .forEach((id) => unmeasurable(id, 'no product image found near the top of the page'));
@@ -793,30 +975,58 @@
       // when that panel frames the photo (up to 1.6× its width); otherwise the photo itself. A framed
       // gallery reads the frame on both passes; a bare photo reads the photo.
       const panel = bg.painter && bg.painter.contains(main) && box(bg.painter).width <= m.width * 1.6 ? bg.painter : main;
-      px('product.gallery_width', box(panel).width);
+      if (grid) add('product.gallery_width', round(box(grid).width), { unit: 'px', tolerance: 4, note: `a photo grid of ${peers.length + 1} images: the grid's width` });
+      else px('product.gallery_width', box(panel).width);
       add('product.gallery_ratio', Math.round((m.width / m.height) * 100) / 100, { tolerance: 0.02 });
       if (bg.image) unmeasurable('product.gallery_background', `the image sits on an image or a picture background (${describe(bg.image)})`, { traversal: 'paint-up' });
       else add('product.gallery_background', colourString(bg.colour), Object.assign({ traversal: 'paint-up' }, gradientNote(bg)));
-      // Where the title sits against the main image: right, left, below or above it.
+      // The gallery as a whole: the grid when there is one, else the main photo.
+      const g = grid ? box(grid) : m;
+      // Where the title sits against the gallery: side by side (right / left) only when the two SHARE rows,
+      // otherwise below / above. Measured: a title ABOVE the photo, read as "left" because its right edge
+      // came before the photo's left.
       if (title && isShown(title)) {
         const t = box(title);
-        add('product.info_position', t.left >= m.right - 4 ? (rtl ? 'left' : 'right') : t.right <= m.left + 4 ? (rtl ? 'right' : 'left')
-          : t.top >= m.bottom - 4 ? 'below' : t.bottom <= m.top + 4 ? 'above' : 'overlay');
+        const shareRows = Math.min(t.bottom, g.bottom) - Math.max(t.top, g.top) > 0;
+        const side = (t.left + t.right) / 2 >= (g.left + g.right) / 2 ? 'right' : 'left';
+        add('product.info_position', shareRows ? (rtl ? { right: 'left', left: 'right' }[side] : side)
+          : t.top >= g.bottom - 4 ? 'below' : 'above');
       } else {
         unmeasurable('product.info_position', 'no visible product title');
       }
-      // Thumbnails: the other, smaller images of the gallery. On a reference, smaller images within one
-      // image-width of the main one that are not the title's block.
-      const thumbs = (pluginStore ? qa('img', gallery) : qa('img').filter((i) => {
-        const r = box(i);
-        return !inChrome(i) && r.width <= m.width * 0.4 && r.left >= m.left - m.width && r.right <= m.right + m.width
-          && r.top >= m.top - m.height && r.bottom <= m.bottom + m.height && !(title && title.parentElement && title.parentElement.contains(i));
-      })).filter((i) => i !== main && isShown(i) && box(i).width <= m.width * 0.4);
+      // Thumbnails: the other, smaller images of the gallery — on screen, and the largest set of ONE size
+      // (the strip), so a badge or a brand mark near the photo never joins them. Their side is where their
+      // centre lies against the photo's. Measured: a left column of 68px thumbnails read as "top" because a
+      // share logo on the right was counted with them. On a reference, within one image-width of the main
+      // photo and not the title's block; a single stray image is not a strip.
+      let thumbs = [];
+      if (!grid) {
+        const near = (pluginStore ? qa('img', gallery) : qa('img').filter((i) => {
+          const r = box(i);
+          return !inChrome(i) && r.left >= m.left - m.width && r.right <= m.right + m.width
+            && r.top >= m.top - m.height && r.bottom <= m.bottom + m.height && !(title && title.parentElement && title.parentElement.contains(i));
+        })).filter((i) => i !== main && isShown(i) && onScreen(i) && box(i).width <= m.width * 0.4
+          // A thumbnail is a photo one can recognise: 40px or more. Around a large photo, the page's own
+          // icons (quantity buttons, badges, 12–32px) outnumbered three 65px thumbnails (measured 28-09-2026).
+          && (pluginStore || (box(i).width >= 40 && box(i).height >= 40)));
+        const sets = [];
+        for (const i of near) {
+          const r = box(i);
+          let s = sets.find((x) => Math.abs(x.w - r.width) <= 3 && Math.abs(x.h - r.height) <= 3);
+          if (!s) sets.push(s = { w: r.width, h: r.height, imgs: [] });
+          s.imgs.push(i);
+        }
+        const strip = sets.sort((a, b) => b.imgs.length - a.imgs.length)[0];
+        thumbs = strip && (pluginStore || strip.imgs.length >= 2) ? strip.imgs : [];
+      }
       if (!thumbs.length) {
         add('product.thumbs_position', 'none');
       } else {
-        const tb = { top: Math.min(...thumbs.map((i) => box(i).top)), left: Math.min(...thumbs.map((i) => box(i).left)), right: Math.max(...thumbs.map((i) => box(i).right)) };
-        add('product.thumbs_position', tb.top >= m.bottom - 4 ? 'bottom' : tb.right <= m.left + 4 ? 'left' : tb.left >= m.right - 4 ? 'right' : 'top');
+        const cx = thumbs.reduce((s, i) => s + (box(i).left + box(i).right) / 2, 0) / thumbs.length;
+        const cy = thumbs.reduce((s, i) => s + (box(i).top + box(i).bottom) / 2, 0) / thumbs.length;
+        const dx = cx - (m.left + m.right) / 2;
+        const dy = cy - (m.top + m.bottom) / 2;
+        add('product.thumbs_position', Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy > 0 ? 'bottom' : 'top'));
       }
     }
     if (title && isShown(title)) {

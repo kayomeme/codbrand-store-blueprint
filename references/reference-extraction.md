@@ -233,9 +233,9 @@ escapes**, because a row present only in your build is reported and not failed.
 | `header.logo_present` · `header.logo_kind` · `header.logo_width` | `logo_kind`: `image` or `wordmark` |
 | `header.nav_items` · `header.nav_labels` | `nav_labels` is an ordered array |
 | `header.nav_font_size` · `header.nav_font_weight` · `header.nav_text_transform` · `header.nav_color` | pair `nav_color` with `header.background` |
-| `header.trailing_icons` · `header.sticky` | `trailing_icons` is an ordered array |
+| `header.trailing_icons` · `header.sticky` | `trailing_icons` is an ordered array: the icon controls after the menu (on a two-row header, after the logo on its row), each `search`, `cart`, `wishlist`, `account`, `menu` or `other` |
 | `footer.background` · `footer.text_color` | **pair** them |
-| `footer.height` · `footer.columns` · `footer.column_headings` · `footer.links_per_column` | headings ordered; links per column an array of counts |
+| `footer.height` · `footer.columns` · `footer.column_headings` · `footer.links_per_column` | headings ordered; links per column an array of counts. A heading is a short title — a sentence in a heading tag ("Find out first. Get our emails…") is not a column |
 | `footer.brand_block` · `footer.social_icons` | |
 | `footer.bottom_bar` · `footer.bottom_bar_links` | |
 | `footer.gutter_left` · `footer.bottom_bar_gutter_left` | **these two should agree.** A mismatch is a real defect and very easy to miss by eye |
@@ -263,9 +263,9 @@ declares nothing (a page builder's product page), set `window.CL_MEASURE_PAGE = 
 
 | id | notes |
 |---|---|
-| `product.gallery_width` · `product.gallery_ratio` | the gallery PANEL the main photo sits in (the box painting its background), or the photo itself when nothing frames it; the photo's width over height |
+| `product.gallery_width` · `product.gallery_ratio` | the gallery PANEL the main photo sits in (the box painting its background), or the photo itself when nothing frames it — or, for a GRID of equal photos side by side, the grid; the photo's width over height. The main photo is the largest one a visitor sees: a carousel's parked slides do not count |
 | `product.gallery_background` | the paint behind the main photo, starting at the photo itself — a transparent photo shows its own element's background |
-| `product.info_position` · `product.thumbs_position` | where the title sits against the main photo: `right`, `left`, `below`, `above`; the thumbnails: `bottom`, `left`, `right`, `top` or `none` |
+| `product.info_position` · `product.thumbs_position` | where the title sits against the main photo: `right` or `left` when they share rows, else `below` or `above`; the thumbnails (a set of same-size images, 40px or more, by the photo — never icons or badges): `bottom`, `left`, `right`, `top` or `none`, and `none` for a photo grid |
 | `product.title_font_size` · `typography.product_title_family` | the title's size; its first font family, lower-case |
 
 **Measure both sides in the SAME browser mode** — a desktop window with its scrollbar, or a phone.
