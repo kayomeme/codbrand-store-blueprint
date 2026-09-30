@@ -5,13 +5,33 @@ store. It turns what went wrong, or slowly, during this build into precise feedb
 team, who build this skill, `codbrand-content-builder` and the store's api (`cl-api/v1`). The goal is
 to improve the TOOLS for every store, not this store.
 
-Nothing is sent anywhere. The report stays with the user, who decides whether to share it with the
-CodBrand team.
+Nothing is sent anywhere. The report is saved as a file on this machine (below) and stays with the
+user, who decides whether to share it with the CodBrand team.
+
+## Where reports are kept, and the earlier ones
+
+Every review ends in ONE file in **`review-the-tools-reports/`**, at the root of the project you are
+working in, or in the folder the user names for reports. Its name is the store's domain and the date
+the report is written: **`{domain}-{DD-MM-YYYY}.md`**, the domain without `https://` or `www.`, for
+example `shop.example.com-30-09-2026.md`. If that name is taken, add `-2`, `-3`. Never write the API
+key, or any other secret, into a report.
+
+**Before your first reply, read the latest earlier report for this domain**: the most recent by the
+date in its name. Of this domain's reports, read only that one: each report carries forward what was
+still open, so the latest one holds the history. If the folder also holds other domains' reports, read the summary table
+of each one's latest report too: a gap in the tools is the same on every store. These are local
+files, so reading them does not touch the store. If there is no report for this domain, this is the
+store's first review.
+
+Refer to a gap by its report's date and its id: `29-09 G1`, or `30-09-2 G1` for the second report of
+that day.
 
 ## How it runs
 
-1. **Confirm, then ask.** Reply in 3 to 5 lines saying what you are about to do, then ask for the
-   user's FIRST point. Do not inspect, change or fix anything yet.
+1. **Confirm, then ask.** Read the earlier reports (above). Then reply in 3 to 5 lines: what you are
+   about to do; one line on the latest report, as `Last report: shop.example.com-29-09-2026.md, 4
+   still open: 27-09 G2, 29-09 G1, 29-09 G2, 29-09 A1` or `First review of this store.`; then ask for
+   the user's FIRST point. Do not inspect, change or fix anything on the store yet.
 2. **The user's points, one at a time (G1, G2, …).** For each one:
    - **Restate it** in one or two sentences, so a misunderstanding is caught before you investigate
      the wrong thing. If it could mean two different things, ask which before checking.
@@ -20,10 +40,12 @@ CodBrand team.
 3. **When the user writes `DONE`, it is your turn.** In one reply, give:
    - **your own gaps** (A1, A2, …);
    - **your custom-code review**;
+   - **since the last report**, when there is an earlier one;
    - **at most five suggestions**.
-   All three are described below. Then ask whether the user wants to discuss any of them.
+   All four are described below. Then ask whether the user wants to discuss any of them.
 4. **When the user writes `FINISH`:** write the report (the format is at the end of this file), as
-   ONE document the user can copy. You send it nowhere yourself.
+   ONE document, save it in the reports folder under the name above, and tell the user its path. You
+   send it nowhere yourself.
 
 Write everything in English, whatever language the store is in: the report is for the CodBrand team.
 
@@ -71,6 +93,9 @@ Write everything in English, whatever language the store is in: the report is fo
 - **Verdict:** CONFIRMED · PARTLY (what differs) · NOT CONFIRMED (why) · CANNOT VERIFY (why)
 - **Evidence:** what you measured, read or received: URL, element, setting value, api response, error text
 - **Exists already?** no, or yes (and where)
+- **Seen before?** no, or yes: the earlier report and its id (`29-09 G1`), and whether the cause is
+  the same. Same cause: it is a repeat of that gap, not a new one. Keep the earlier id beside the new
+  one and count it once.
 - **Cause:** the chain, in 2 to 4 lines
 - **Area:** one from the table, with the exact file, section, door or setting
 - **Fix idea:** what the tool should do or say, as a need. The CodBrand team decides how.
@@ -109,6 +134,21 @@ what it achieves. Then give exactly one outcome:
   in the admin settings. Suggest only; never build.
 - **Otherwise, keep it as custom code,** and say why: too specific, or not worth a setting.
 
+## Since the last report
+
+Only when an earlier report exists for this domain. Take every gap it left open: its "Still open,
+carried forward" line when it has one, otherwise every gap it confirmed. Give each one exactly one
+status:
+
+- **FIXED:** re-checked, and the problem is gone. Say how you know.
+- **STILL THERE:** re-checked, and it is still there. Say what you saw.
+- **NOT RE-CHECKED:** say why. When the store still carries the workaround for that gap (custom code,
+  a value set by hand to get around it), a re-check proves nothing: write NOT RE-CHECKED (workaround
+  live), never FIXED.
+
+Re-check the same way as a point: read-only, and say how you know. A gap the user raised again in this
+review takes its status from that verdict.
+
 ## At most five suggestions
 
 Besides the gaps, suggest what would make the tools better. A suggestion can:
@@ -131,19 +171,28 @@ One self-contained markdown document, written for the CodBrand team, who build t
 skills and have never seen this store:
 
 1. **Context:** store URL; plugin version; each skill's name and the exact version tag you used; the
-   active theme; which capabilities you had (browser, image generation, fetching pages).
-2. **Summary table:** every confirmed gap, with id, title, source (user or agent), area and
-   severity. Severity is one of: seen by shoppers, seen by the merchant, or internal to the tools.
-3. **The user's gaps (G)**, then **your own gaps (A)**. For each gap:
+   active theme; which capabilities you had (browser, image generation, fetching pages); the earlier
+   report this one follows (its file name), or "first review".
+2. **Summary table:** every confirmed gap, with id, title, source (user or agent), area,
+   severity, and new or repeat (with the earlier id). Severity is one of: seen by shoppers, seen by
+   the merchant, or internal to the tools.
+3. **Since the last report:** a table of every gap the earlier report left open, with its earlier id,
+   title, status and how you know. Then one line, **Still open, carried forward:**, listing by id
+   every gap that is STILL THERE or NOT RE-CHECKED, plus every gap confirmed in this review, so the
+   next review needs only this report. On a first review, write "first review" and the line.
+4. **The user's gaps (G)**, then **your own gaps (A)**. For each gap:
    - the symptom;
    - the evidence;
    - why it happened, quoting the misleading or missing text or response;
    - the area and exact location;
    - the proposed fix;
    - how to test the fix, i.e. what must be true afterwards.
-4. **The custom-code review**, one line per piece of code and its outcome.
-5. **The suggestions**, five at most, ranked.
-6. **Root causes shared by several gaps.** A pattern is worth more than one instance.
-7. **What worked well and must stay,** so a fix does not remove it.
-8. **Checked and not confirmed:** points that did not hold up, one line each with the reason.
-9. **Honesty notes:** what you could not verify, and which conclusions are inferences.
+5. **The custom-code review**, one line per piece of code and its outcome.
+6. **The suggestions**, five at most, ranked.
+7. **Root causes shared by several gaps.** A pattern is worth more than one instance.
+8. **What worked well and must stay,** so a fix does not remove it.
+9. **Checked and not confirmed:** points that did not hold up, one line each with the reason.
+10. **Honesty notes:** what you could not verify, and which conclusions are inferences.
+
+Save it as `review-the-tools-reports/{domain}-{DD-MM-YYYY}.md` (see "Where reports are kept"), never
+over an earlier report, and give the user the path.
