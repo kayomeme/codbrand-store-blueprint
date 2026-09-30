@@ -8,6 +8,31 @@ to improve the TOOLS for every store, not this store.
 Nothing is sent anywhere. The report is saved as a file on this machine (below) and stays with the
 user, who decides whether to share it with the CodBrand team.
 
+## Bugs and gaps, never features
+
+This review finds **bugs** and **gaps** in the tools that exist (the plugin, the api and its docs, the
+skills, their scripts and checks, the shipped defaults) and in your own work, so they can be fixed. It
+never asks for a new feature: no new block, no new setting, no new door, no new system.
+
+- **Bug:** an existing tool does the wrong thing.
+- **Gap:** an existing tool, doc, schema, error message, skill step, check or script is silent,
+  misleading or incomplete for what it already claims to do.
+- **Agent:** the tools were right and you got it wrong.
+- **Needs a feature:** the only fix would be a capability the tools do not have. Write **NEEDS A
+  FEATURE — owner decides**, give the evidence, and propose nothing for it: no design, no suggestion,
+  no fix idea. Whether the tools grow is decided by the people who build them, not by this review.
+- **Not sure** whether it is a gap or a feature? Ask the user before you classify it.
+
+**Display and design count, as much as behaviour.** A bug includes anything the store SHOWS wrong:
+layout, spacing, sizes, colours, fonts, alignment, overlap or clipping, the phone layout, images at the
+wrong ratio, blocks of one kind that do not share one look. A gap includes design guidance that is
+silent or misleading: a skill's design rule, a doc's description of how something looks, a default
+that looks wrong for this kind of store. A wrong look is NEEDS A FEATURE only when no existing setting,
+preset or door can produce the right one. If one can and was not used, it is AGENT; if the tools said
+nothing about it, it is a gap.
+
+Improving a skill's own steps, checks and scripts is not a feature: it makes an existing tool do its job.
+
 ## Where reports are kept, and the earlier ones
 
 Every review ends in ONE file in **`review-the-tools-reports/`**, at the root of the project you are
@@ -81,7 +106,7 @@ Write everything in English, whatever language the store is in: the report is fo
 |---|---|---|
 | SKILL: store-blueprint | a step, rule, check or script was wrong, missing or unclear | file + section, or script + check |
 | SKILL: content-builder | the same, for the page-building skill | file + section, or script |
-| API | a door was missing, refused something reasonable, or returned something misleading; or its doc (`/docs/…`), schema or error message was wrong or silent | door + field, or doc slug |
+| API | a door refused something reasonable or returned something misleading; or its doc (`/docs/…`), schema or error message was wrong or silent | door + field, or doc slug |
 | PLUGIN | the storefront itself renders or behaves wrongly, whatever the settings | page + element + what happens |
 | DEFAULTS | a value the plugin ships with is wrong for this kind of store | setting + shipped value |
 | AGENT | the tools were right and you got it wrong | what you should have done |
@@ -97,8 +122,11 @@ Write everything in English, whatever language the store is in: the report is fo
   the same. Same cause: it is a repeat of that gap, not a new one. Keep the earlier id beside the new
   one and count it once.
 - **Cause:** the chain, in 2 to 4 lines
+- **Kind:** BUG · GAP · AGENT · NEEDS A FEATURE — owner decides (see "Bugs and gaps, never features")
 - **Area:** one from the table, with the exact file, section, door or setting
-- **Fix idea:** what the tool should do or say, as a need. The CodBrand team decides how.
+- **Fix idea:** for a bug or a gap, what the existing tool should do or say, as a need. The CodBrand
+  team decides how. For AGENT, what you should have done. For a missing capability, write NEEDS A
+  FEATURE — owner decides instead, and nothing else.
 
 End every reply with the running list of ALL gaps so far (G and A): id · title · verdict · area.
 
@@ -121,18 +149,17 @@ say so rather than reconstruct it.
 
 ## Your custom-code review
 
-Custom CSS or JS is the LAST door. Anything common enough should become a normal setting, so the next
-build uses the store's own settings instead of code.
+Custom CSS or JS is the LAST door. For each piece, the question is whether the store's existing
+settings could have done it.
 
 List every piece of custom code you wrote on a component design: a design's `custom_css` or
 `custom_js` (header, footer, product, cart and so on). For each one, give the design, the code, and
 what it achieves. Then give exactly one outcome:
 
 - **An existing setting could already do it.** The code was not needed; name the setting.
-- **No setting does it, and one would be simple and useful.** Suggest a new setting, but only when
-  it is simple, adds real value, and is something a merchant would reasonably want to set themselves
-  in the admin settings. Suggest only; never build.
-- **Otherwise, keep it as custom code,** and say why: too specific, or not worth a setting.
+- **No setting does it, and many stores would need it:** NEEDS A FEATURE — owner decides. The code
+  and what it achieves are the evidence; propose no setting.
+- **Otherwise, keep it as custom code,** and say why: specific to this store.
 
 ## Since the last report
 
@@ -147,14 +174,16 @@ status:
   live), never FIXED.
 
 Re-check the same way as a point: read-only, and say how you know. A gap the user raised again in this
-review takes its status from that verdict.
+review takes its status from that verdict. An item marked `(feature)` is not re-checked: carry it
+forward as it is, unless the tools now have that capability; then say so.
 
 ## At most five suggestions
 
-Besides the gaps, suggest what would make the tools better. A suggestion can:
-- **ADD** something the tools do not have, or
-- **UPDATE** something that exists but works poorly or is unclear, such as a skill section, a door's
-  behaviour, an error message, a script or a check.
+Besides the gaps, suggest how to make the EXISTING tools work better. A suggestion UPDATES something
+that exists: a rule, step, check or script in a skill; a doc; an error message; a door's behaviour; a
+shipped default (owner decides). Improving a skill's own checks and scripts counts. A capability the
+tools do not have is never a suggestion: it is NEEDS A FEATURE — owner decides, in its own section of
+the report.
 
 **Five at most, the most valuable first.** Before suggesting anything, verify all three:
 1. **It does not already exist.** Check the api, its docs and the skills. If it exists, it is not a
@@ -162,8 +191,8 @@ Besides the gaps, suggest what would make the tools better. A suggestion can:
 2. **It is possible** with how the tools work today, not something that needs a big redesign.
 3. **It is easy to do:** a small, focused change, with no over-engineering.
 
-For each suggestion, say whether it adds or updates, which problem from THIS build it solves, what it
-would save (time, mistakes, quality the shopper sees), and why it passes the three checks.
+For each suggestion, say what it updates, which problem from THIS build it solves, what it would save
+(time, mistakes, quality the shopper sees), and why it passes the three checks.
 
 ## The report: only after `FINISH`
 
@@ -173,26 +202,30 @@ skills and have never seen this store:
 1. **Context:** store URL; plugin version; each skill's name and the exact version tag you used; the
    active theme; which capabilities you had (browser, image generation, fetching pages); the earlier
    report this one follows (its file name), or "first review".
-2. **Summary table:** every confirmed gap, with id, title, source (user or agent), area,
+2. **Summary table:** every confirmed item, with id, title, source (user or agent), kind, area,
    severity, and new or repeat (with the earlier id). Severity is one of: seen by shoppers, seen by
    the merchant, or internal to the tools.
 3. **Since the last report:** a table of every gap the earlier report left open, with its earlier id,
    title, status and how you know. Then one line, **Still open, carried forward:**, listing by id
-   every gap that is STILL THERE or NOT RE-CHECKED, plus every gap confirmed in this review, so the
-   next review needs only this report. On a first review, write "first review" and the line.
-4. **The user's gaps (G)**, then **your own gaps (A)**. For each gap:
+   every gap that is STILL THERE or NOT RE-CHECKED, every gap confirmed in this review, and every
+   NEEDS A FEATURE item marked `(feature)`, so the next review needs only this report and does not
+   report a feature again as new. On a first review, write "first review" and the line.
+4. **The user's gaps (G)**, then **your own gaps (A)**: bugs, gaps and your own mistakes only. For
+   each one:
    - the symptom;
    - the evidence;
    - why it happened, quoting the misleading or missing text or response;
    - the area and exact location;
-   - the proposed fix;
+   - the proposed fix to the existing tool;
    - how to test the fix, i.e. what must be true afterwards.
-5. **The custom-code review**, one line per piece of code and its outcome.
-6. **The suggestions**, five at most, ranked.
-7. **Root causes shared by several gaps.** A pattern is worth more than one instance.
-8. **What worked well and must stay,** so a fix does not remove it.
-9. **Checked and not confirmed:** points that did not hold up, one line each with the reason.
-10. **Honesty notes:** what you could not verify, and which conclusions are inferences.
+5. **Needs a feature — owner decides:** one short line per item: its id, what could not be done, the
+   evidence. No design, no proposal. Never mix these into the fixes above.
+6. **The custom-code review**, one line per piece of code and its outcome.
+7. **The suggestions**, five at most, ranked.
+8. **Root causes shared by several gaps.** A pattern is worth more than one instance.
+9. **What worked well and must stay,** so a fix does not remove it.
+10. **Checked and not confirmed:** points that did not hold up, one line each with the reason.
+11. **Honesty notes:** what you could not verify, and which conclusions are inferences.
 
 Save it as `review-the-tools-reports/{domain}-{DD-MM-YYYY}.md` (see "Where reports are kept"), never
 over an earlier report, and give the user the path.
