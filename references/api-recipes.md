@@ -477,6 +477,31 @@ for every placement (`GET /custom_blocks/{id}` → `placements[].id` lists them)
 on both seeded blocks and rewrite `header_title` on each — a store can have the same block placed on
 both `cart` and `checkout`, and each placement carries its own copy of this field.
 
+### A custom block among a surface's own collapsibles: one look per stack
+
+A block placed as a collapsible or a popup, on a surface whose own sections are collapsible (a
+product page's description and specifications), joins their stack. **Blocks of one kind in one stack
+share one look:** the same header height, chevron, divider, gap above and body padding. A shopper reads
+a stack as a list of equals. One that looks different reads as an ad or a mistake.
+
+1. **Check that the door can do it, before any write.** Read a placement of this store
+   (`GET /custom_blocks/placements/{id}`; if there is none yet, create yours always visible first and
+   read that). If it carries `header_preset`, a placement takes its look from design presets. If it
+   does not, this store's door predates that: send no look field (the write is refused whole) and go
+   to 4.
+2. **Take the host's ids, never a literal one.** Read the surface's own design
+   (`section_manager/global_settings/{type}/{id}`) and take the ids its own collapsibles use. Which
+   design key feeds which placement field is in `/docs/custom_block_placements` → "How it looks": read
+   it there. The gap above is part of the look: take its margin-top the same way. The ids in the doc's
+   examples are examples, not this store's.
+3. **Send them on the placement, then read it back.** The ids it returns are the ones it renders
+   with. Say the block matches only when they equal the host's.
+4. **When it cannot be matched** (the door predates it, or the doc gives no mapping for that
+   surface), never ship a look-alike that differs. Place the block always visible (`display_type`
+   `none`, in its own frame) or away from the stack, or ask the merchant which they want, and tell
+   them why. This holds when the merchant asked for a collapsible too: ask before you place one that
+   cannot match. Placing it and naming the mismatch afterwards is the same defect, announced.
+
 ## The header — the logo, and the half-state to avoid
 
 A logo is two writes, not one, and the failure mode is silent.
