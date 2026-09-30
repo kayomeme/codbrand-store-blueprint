@@ -3,6 +3,7 @@
  * handover.mjs — is the store actually finished, or does it only look finished?
  *
  *   node handover.mjs <site-url> <api-key> [--wordmark-intended "why there is no logo image"]
+ *                     [--block-kept <custom-block-id> "why this build did not write it"] …
  *
  * `preflight.mjs` asks whether a build can START. This asks whether it may END. It is the
  * UNCONDITIONAL gate: `match.mjs` only runs when the merchant named a reference site, which most of
@@ -74,6 +75,16 @@
  *      reversal with no reason reads like a mistake on the next run. (Checked only where the blueprint
  *      records it; see checkReversals().)
  *
+ *  13. THE HAND-STYLED BLOCK. A custom block's content is markup, like a page's, and WordPress's own
+ *      check accepts anything inside a Custom HTML block: hand-styled rows pass it, return 200, and
+ *      then render unlike the rest of the store, with nothing the merchant can change from the block
+ *      editor. `codbrand-content-builder`'s validator is the only check that looks inside one, so it
+ *      runs here on every custom block the store SHOWS — through a placement, as a topbar, header or
+ *      footer, or as a product's extra description. A block placed to load AFTER the page arrives
+ *      without the CSS behind its layout settings (WordPress prints it while it renders the page),
+ *      so that fails too. Measured on one store: every placed block had been written by hand, and
+ *      each failed the validator with 2 to 7 errors.
+ *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
  *
@@ -93,12 +104,27 @@
  * preflight.mjs and match.mjs do not — killing the loop mid-write truncates the report.
  */
 
+import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+
 const argv = process.argv.slice(2);
 const flagAt = argv.findIndex((a) => a === '--wordmark-intended');
 const wordmarkReason = flagAt === -1 ? null : (argv[flagAt + 1] ?? '');
-/* `flagAt === -1` must not mean "skip index 0" — that silently ate the site URL when no flag was
- * passed, and every no-flag case then failed with a usage error that LOOKED like a real refusal. */
-const positional = argv.filter((a, i) => !a.startsWith('--') && (flagAt === -1 || i !== flagAt + 1));
+/* `--block-kept <id> "<why>"`, repeatable: a custom block the store shows that this build did not
+ * write — the merchant's own, on an established store — so its content is not this build's to fix. */
+const keptBlocks = new Map();
+/* The values a flag takes are not positional. `flagAt === -1` must not mean "skip index 0" — that
+ * silently ate the site URL when no flag was passed, and every no-flag case then failed with a usage
+ * error that LOOKED like a real refusal. */
+const flagValues = new Set(flagAt === -1 ? [] : [flagAt + 1]);
+argv.forEach((a, i) => {
+  if (a !== '--block-kept') return;
+  flagValues.add(i + 1).add(i + 2);
+  keptBlocks.set(String(argv[i + 1] ?? '').trim(), String(argv[i + 2] ?? '').trim());
+});
+const positional = argv.filter((a, i) => !a.startsWith('--') && !flagValues.has(i));
 const [rawUrl, apiKey] = positional;
 
 /* Long enough that it cannot be a shrug. Mirrors match.mjs's reason contract: the agent being gated
@@ -1535,6 +1561,111 @@ async function rowsFor(call, R, ctx, spec, productsRead) {
   return countRows(call, `${pathFor(spec.slug, spec.path, R)}?${query}`);
 }
 
+/* ── 13. custom blocks: content, checked like a page ───────────────────────────────────────────── */
+
+/** `codbrand-content-builder`'s validator, found in the same two places, in the same order, that
+ *  preflight.mjs looks for the skill. Its validator is the only check that looks INSIDE a Custom
+ *  HTML block, which WordPress's own check accepts whatever it holds. */
+function findContentBuilderValidator() {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  for (const root of [join(home, '.claude', 'skills', 'codbrand-content-builder'),
+    join(process.cwd(), '.claude', 'skills', 'codbrand-content-builder')]) {
+    if (!existsSync(join(root, 'SKILL.md'))) continue;
+    const script = join(root, 'scripts', 'validate_pattern.mjs');
+    return existsSync(script) ? { script }
+      : { missing: `${root} has no scripts/validate_pattern.mjs — the skill's other half was never fetched` };
+  }
+  return { missing: 'codbrand-content-builder is not installed (preflight.mjs checks for it too)' };
+}
+
+/** Does this markup use a layout setting — the kind whose CSS WordPress prints while it renders the
+ *  page? A block comment carrying `layout` (a row, a stack, a grid, a constrained group) or a block gap. */
+function hasLayoutSettings(content) {
+  for (const m of String(content ?? '').matchAll(/<!--\s*wp:[\w/-]+\s+(\{[\s\S]*?\})\s*\/?-->/g)) {
+    if (/"(layout|blockGap)"\s*:/.test(m[1])) return true;
+  }
+  return false;
+}
+
+const clip = (s, n) => { const t = String(s).replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+
+/**
+ * Every custom block the store SHOWS, and what content-builder's validator says about each.
+ * Shown = a placement on a design, a layout surface (`<surface>_layout_config` entries of type
+ * `custom_block`), or a product's `extra_description_block_id`. A block shown nowhere is skipped: the
+ * shopper never sees it. A block kept with `--block-kept` is not validated — it is not this build's.
+ */
+async function checkCustomBlocks(call, R, store, productsRead, kept) {
+  const read = await walk(call, pathFor('custom_blocks', 'custom_blocks', R));
+  if (read.error) return { skipped: `could not read the custom blocks — ${read.error}` };
+  const byId = new Map(read.rows.map((b) => [Number(b.id), b]));
+
+  const where = new Map();
+  const shownAt = (id, place) => { const n = Number(id); if (n > 0) where.set(n, [...(where.get(n) ?? []), place]); };
+  const deferred = [];
+  for (const b of read.rows) {
+    for (const p of asArray(b.placements) ?? []) {
+      shownAt(b.id, `${p.consumer_compo} design ${p.consumer_instance_id}`);
+      if (p.render_mode === 'after_page_load' && hasLayoutSettings(b.content)) deferred.push({ block: b, placement: p });
+    }
+  }
+  for (const [key, value] of Object.entries(store ?? {})) {
+    if (!key.endsWith('_layout_config')) continue;
+    let cfg = value;
+    if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch { cfg = null; } }
+    const surface = key.slice(0, -'_layout_config'.length);
+    const pages = (cfg?.pages && typeof cfg.pages === 'object') ? Object.entries(cfg.pages) : [];
+    for (const [context, d] of [['default', cfg?.default], ...pages]) {
+      if (d && d.type === 'custom_block') shownAt(d.id, `the store's ${surface}${context === 'default' ? '' : ` on ${context} pages`}`);
+    }
+  }
+  if (!productsRead.error) {
+    for (const p of productsRead.rows) {
+      if (Number(p.extra_description_block_id) > 0) shownAt(p.extra_description_block_id, `product ${p.id}'s extra description`);
+    }
+  }
+
+  const out = { shown: where.size, deferred, missing: [], failing: [], warned: [], unreadable: [], kept: [], shortReason: [],
+    keptNotShown: [...kept.keys()].filter((id) => !where.has(Number(id))), productsUnread: !!productsRead.error, checked: 0 };
+  const toValidate = [];
+  for (const [id, places] of where) {
+    const block = byId.get(id);
+    if (!block) { out.missing.push({ id, places }); continue; }
+    const reason = kept.get(String(id));
+    if (reason !== undefined) {
+      if (reason.length >= MIN_REASON) out.kept.push({ block, reason });
+      else out.shortReason.push({ block, places });
+      continue;
+    }
+    toValidate.push({ block, places });
+  }
+  if (!toValidate.length) return out;
+
+  const validator = findContentBuilderValidator();
+  if (!validator.script) return { ...out, notChecked: validator.missing, pending: toValidate.length };
+  const dir = mkdtempSync(join(tmpdir(), 'handover-blocks-'));
+  try {
+    for (const { block, places } of toValidate) {
+      const file = join(dir, `custom-block-${block.id}.html`);
+      writeFileSync(file, String(block.content ?? ''));
+      const run = spawnSync(process.execPath, [validator.script, file], { encoding: 'utf8', timeout: 60000 });
+      let report = null;
+      try { report = JSON.parse(run.stdout); } catch { /* no report: said below */ }
+      if (!report || !Array.isArray(report.errors)) {
+        out.unreadable.push({ block, places, why: clip(run.stderr || run.error?.message || 'the validator printed no report', 160) });
+        continue;
+      }
+      out.checked++;
+      const warnings = asArray(report.warnings) ?? [];
+      if (report.errors.length) out.failing.push({ block, places, errors: report.errors, warnings });
+      else if (warnings.length) out.warned.push({ block, warnings });
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return out;
+}
+
 async function main(base) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const call = async (path) => {
@@ -1666,6 +1797,59 @@ async function main(base) {
     if (imgs.undetermined && imgs.undetermined.length) {
       line(false, `${imgs.undetermined.length} image(s) UNDETERMINED — dimensions unreadable, so not verified: `
         + imgs.undetermined.slice(0, 5).join(', '));
+    }
+  }
+
+  /* ── custom blocks: content, checked like a page — WordPress accepts anything in a Custom HTML block ── */
+  const cb = await checkCustomBlocks(call, R, store, productsRead, keptBlocks);
+  const blockLabel = (b) => `custom block #${b.id} "${clip(b.title ?? '', 40)}"`;
+  if (cb.skipped) {
+    line(false, `${cb.skipped} — custom blocks NOT checked, and not passed`);
+    problems.push(`custom blocks were NOT checked — ${cb.skipped}. A check that did not run is not a pass: re-run.`);
+  } else {
+    for (const m of cb.missing) {
+      problems.push(`custom block #${m.id} is shown on ${m.places.join(', ')}, but no such block exists — that place renders\n` +
+        '      nothing. Point it at a block that exists, or remove the reference.');
+    }
+    for (const d of cb.deferred) {
+      problems.push(`${blockLabel(d.block)} is placed to load AFTER the page (placement ${d.placement.id}, ` +
+        `${d.placement.consumer_compo} design ${d.placement.consumer_instance_id}) and uses layout settings.\n` +
+        '      WordPress prints the CSS behind layout settings while it renders the page, so a block fetched after\n' +
+        '      the page loses its spacing, wrapping and widths. Set that placement\'s render_mode to "immediate".');
+    }
+    if (cb.notChecked) {
+      line(false, `${cb.pending} custom block(s) NOT checked — ${cb.notChecked}`);
+      problems.push(`${cb.pending} custom block(s) the store shows were NOT checked: ${cb.notChecked}. A check that did not run is not a pass.`);
+    }
+    for (const u of cb.unreadable) {
+      problems.push(`${blockLabel(u.block)} was NOT checked — codbrand-content-builder's validator gave no report (${u.why}). Re-run.`);
+    }
+    for (const f of cb.failing) {
+      problems.push(`${blockLabel(f.block)} — shown on ${f.places.join(', ')} — fails codbrand-content-builder's checks ` +
+        `(${f.errors.length} error(s)${f.warnings.length ? `, ${f.warnings.length} warning(s)` : ''}):\n` +
+        f.errors.slice(0, 3).map((e) => `        - ${clip(e, 150)}`).join('\n') +
+        (f.errors.length > 3 ? `\n        … and ${f.errors.length - 3} more` : '') + '\n' +
+        '      A custom block is content: make it with codbrand-content-builder (its target custom_blocks) and publish\n' +
+        '      only what passes its checks — api-recipes.md → "Custom blocks are content". If this build did not\n' +
+        `      write it (the merchant's own block), say so: --block-kept ${f.block.id} "<why, at least ${MIN_REASON} characters>"`);
+    }
+    for (const s of cb.shortReason) {
+      problems.push(`${blockLabel(s.block)} is kept with a reason shorter than ${MIN_REASON} characters. Say why this build did not\n` +
+        `      write it: --block-kept ${s.block.id} "<why, at least ${MIN_REASON} characters>"`);
+    }
+    for (const k of cb.kept) line(true, `${blockLabel(k.block)} kept as not this build's: "${k.reason}"`);
+    for (const w of cb.warned) {
+      notes.push(`${blockLabel(w.block)} passes codbrand-content-builder's checks with ${w.warnings.length} warning(s): ${clip(w.warnings[0], 150)}`);
+    }
+    for (const id of cb.keptNotShown) notes.push(`--block-kept ${id}: the store shows no custom block #${id}, so it excuses nothing.`);
+    if (cb.productsUnread) notes.push('products could not be read, so custom blocks used as a product\'s extra description were NOT looked for.');
+    const blockTrouble = cb.missing.length + cb.deferred.length + cb.failing.length + cb.unreadable.length + cb.shortReason.length + (cb.notChecked ? 1 : 0);
+    if (!cb.shown) {
+      line(true, 'the store shows no custom block');
+    } else if (!blockTrouble && cb.checked) {
+      line(true, `every custom block the store shows passes codbrand-content-builder's checks and renders with the page ` +
+        `(${cb.checked} checked${cb.kept.length ? `, ${cb.kept.length} kept as not this build's` : ''})`);
+      passed.push('custom blocks pass content-builder\'s checks');
     }
   }
 
@@ -1874,7 +2058,7 @@ async function main(base) {
 }
 
 if (!rawUrl || !apiKey) {
-  console.error('usage: node handover.mjs <site-url> <api-key> [--wordmark-intended "reason"]');
+  console.error('usage: node handover.mjs <site-url> <api-key> [--wordmark-intended "reason"] [--block-kept <id> "reason"] …');
   process.exitCode = 1;
 } else {
   const base = rawUrl.replace(/\/+$/, '').replace(/\/wp-json.*$/, '') + '/wp-json/cl-api/v1';

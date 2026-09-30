@@ -286,6 +286,7 @@ else; never send `"no"` as a tidy-up.
 | artifact | who makes it | then you |
 |---|---|---|
 | page markup | `codbrand-content-builder` | publish what it returns, unmodified |
+| custom-block content | `codbrand-content-builder` (its target `custom_blocks`) | publish it, place it `immediate`, apply its CSS/JS at its level — "Custom blocks are content" |
 | photos and the logo | the agent you are running in | upload via `media`, pass the returned `url` on |
 | icons | the agent — inline SVG or a service, its call | nothing, unless it chose to upload one |
 
@@ -449,7 +450,7 @@ Nobody wrote that. It shipped with the store, and the build never noticed becaus
 
 | door | what it holds |
 |---|---|
-| `custom_blocks` | the promo blocks' own body copy — the refund and delivery promises above |
+| `custom_blocks` | the promo blocks' own body copy — the refund and delivery promises above. The words are yours to decide; the content is made by `codbrand-content-builder` ("Custom blocks are content") |
 | `custom_blocks/placements` | **a SEPARATE English string per placement** — `header_title` — see below |
 | `checkout/fields` | the checkout form labels and placeholders |
 | `checkout/shipping_rates` | the delivery cost and the free-delivery threshold |
@@ -476,6 +477,30 @@ body read correctly in French while its collapse header still read "Money-back g
 for every placement (`GET /custom_blocks/{id}` → `placements[].id` lists them). List every placement
 on both seeded blocks and rewrite `header_title` on each — a store can have the same block placed on
 both `cart` and `checkout`, and each placement carries its own copy of this field.
+
+### Custom blocks are content: made by `codbrand-content-builder`, rendered with the page
+
+A custom block's content is markup, like a page's, and the merchant edits it in the same block editor.
+So it is made the same way, whether you add a block or rewrite a seeded one:
+
+1. **`codbrand-content-builder` makes it** (its target `custom_blocks`), and it passes that skill's
+   checks before you publish it. Never write a custom block's content yourself. Hand-styled HTML passes
+   WordPress's own check, which accepts anything inside a Custom HTML block; it then renders unlike the
+   rest of the store, and nothing in it can be changed from the block editor's sidebar.
+2. **Place it with render mode `immediate`**, so it renders with the page. A block loaded after the
+   page arrives without the CSS behind its layout settings: WordPress prints that CSS while it renders
+   the page. Measured on a WordPress 7.1 store: 0px from each divider to the next row with the page;
+   loaded after it, 24px under every divider and rows wrapping.
+3. **Apply the CSS or JavaScript it hands over, at the level it names**, through the store's
+   custom-code doors (`/docs/custom_code_css_js`): a surface's design, the store, a page or a product.
+   Each level has its own permission, never part of `write`; a 403 means the merchant ticks Custom code
+   for that row on the key. **Read what the level already holds, and merge**: a write replaces the
+   whole field. Never put it in the content, or in the block's own "Custom CSS" field.
+
+`scripts/handover.mjs` runs `codbrand-content-builder`'s validator on the content of every custom
+block the store shows, and fails a block placed to load after the page when it uses layout settings.
+A block this build did not write (the merchant's own) is excused only with a reason:
+`--block-kept <id> "why"`.
 
 ### A custom block among a surface's own collapsibles: one look per stack
 
