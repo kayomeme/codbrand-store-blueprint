@@ -29,6 +29,17 @@
  *                       `certain: false` — "could not tell", never "clean".
  *   dead-anchor         an in-page link `href="#id"` whose target is not on the page, or is hidden.
  *                       Measured: a summary linking to a shipping block that was switched off.
+ *   stack-mismatch      collapsibles lined up one under another (a product's description and
+ *                       specifications, and a block placed with them) that do not share one look:
+ *                       header height, chevron size and colour, the divider under the header, the rule
+ *                       between them, the gap above and, open, the body's padding. Measured: a delivery
+ *                       block placed under two product sections drew a 22px header with no divider, a
+ *                       14px grey chevron, a 12px gap and an unpadded body, against 59px, a 1px divider,
+ *                       18px, 24px and 16px.
+ *
+ * A collapsible is a <details>, a block whose header toggles it with aria-expanded, or this plugin's own
+ * toggle: an element carrying is_open="yes|no" whose first child is its header. To measure them open,
+ * set every is_open to "yes" (and every <details> open); closed, to "no".
  *
  * No dependencies. It only reads the page.
  */
@@ -265,8 +276,114 @@
     else if (!isShown(target)) flag('dead-anchor', describe(a), `links to #${id}, which is on the page but hidden`);
   }
 
-  const openCollapsibles = qa('details[open]').length + qa('[aria-expanded="true"]').filter(isShown).length;
-  const collapsibles = qa('details').length + qa('[aria-expanded]').filter(isShown).length;
+  // ── stack-mismatch ────────────────────────────────────────────────────────────────────────────
+  // A collapsible is a <details> (its header: the <summary>), an element carrying is_open="yes|no" whose
+  // first child is a header (this plugin's toggles), or a block whose first child toggles it through
+  // aria-expanded. An always-visible block may carry is_open too: with no header it is not a collapsible.
+  const collapsibleList = [];
+  const addCollapsible = (el, header, open) => {
+    if (el && header && !collapsibleList.some((c) => c.el === el)) collapsibleList.push({ el, header, open });
+  };
+  for (const d of qa('details')) addCollapsible(d, q(':scope > summary', d), d.open);
+  for (const el of qa('[is_open]')) {
+    const h = el.firstElementChild;
+    if (h && /header/i.test(typeof h.className === 'string' ? h.className : '')) addCollapsible(el, h, el.getAttribute('is_open') === 'yes');
+  }
+  for (const t of qa('[aria-expanded]')) {
+    if (t.parentElement && t.parentElement.firstElementChild === t) addCollapsible(t.parentElement, t, t.getAttribute('aria-expanded') === 'true');
+  }
+  // A stack: collapsibles lined up one under the next — the same column, at most 64px apart, nothing
+  // between them. One nested in another's body belongs to that body, not to the stack.
+  const shownCollapsibles = collapsibleList.filter((c) => isShown(c.el) && isShown(c.header));
+  const stackable = shownCollapsibles.filter((c) => !shownCollapsibles.some((o) => o !== c && o.el.contains(c.el)))
+    .sort((a, b) => box(a.el).top - box(b.el).top);
+  const stacks = [];
+  let run = [];
+  for (const c of stackable) {
+    const prev = run[run.length - 1];
+    if (prev) {
+      const [pr, cr] = [box(prev.el), box(c.el)];
+      const gap = cr.top - pr.bottom;
+      const aligned = overlapX(pr, cr) >= Math.min(pr.width, cr.width) * 0.9 && Math.abs(pr.width - cr.width) <= Math.max(pr.width, cr.width) * 0.1;
+      const between = boxes.some((b) => !related(b, { el: prev.el }) && !related(b, { el: c.el })
+        && b.r.top >= pr.bottom - 1 && b.r.bottom <= cr.top + 1 && overlapX(b.r, cr) > 0);
+      if (aligned && gap >= -1 && gap <= 64 && !between) { run.push(c); continue; }
+    }
+    if (run.length > 1) stacks.push(run);
+    run = [c];
+  }
+  if (run.length > 1) stacks.push(run);
+
+  const hex = (c) => '#' + [c.r, c.g, c.b].map((n) => Math.round(n).toString(16).padStart(2, '0')).join('');
+  const lineOf = (e) => (e ? `${Math.round(e.w * 2) / 2}px ${hex(e.c)}` : 'none');
+  // The chevron: the last visible icon in the header (the toggle sits at its end), its size and its paint.
+  const chevronOf = (h) => {
+    const icons = qa('svg', h).filter(isShown);
+    if (!icons.length) return null;
+    const svg = icons.reduce((a, b) => (box(b).right > box(a).right ? b : a));
+    const shape = q('path, line, polyline, polygon, circle, rect, ellipse', svg) || svg;
+    const cs = getComputedStyle(shape);
+    const stroke = parseFloat(cs.strokeWidth) > 0 ? parseColour(cs.stroke) : null;
+    const paint = (stroke && stroke.a > 0.05) ? stroke : parseColour(cs.fill);
+    const r = box(svg);
+    return { size: round(Math.max(r.width, r.height)), colour: paint && paint.a > 0.05 ? paint : null };
+  };
+  // The body's padding, open only: the first element after the header, or the single wrapper inside it
+  // that carries the padding.
+  const bodyPaddingOf = (c) => {
+    if (!c.open) return null;
+    let body = c.header.nextElementSibling;
+    while (body && !isShown(body)) body = body.nextElementSibling;
+    for (let depth = 0; body && depth < 4; depth++) {
+      const cs = getComputedStyle(body);
+      const pad = { top: round(parseFloat(cs.paddingTop)), left: round(parseFloat(cs.paddingLeft)) };
+      if (pad.top || pad.left || body.children.length !== 1) return pad;
+      body = body.firstElementChild;
+    }
+    return body ? { top: 0, left: 0 } : null;
+  };
+  const PROPS_LOOK = [
+    { key: 'header', label: 'header', show: (v) => `${v}px`, eq: (a, b) => Math.abs(a - b) <= 2 },
+    { key: 'chevron', label: 'chevron', show: (v) => (v ? `${v.size}px ${v.colour ? hex(v.colour) : ''}`.trim() : 'none'),
+      eq: (a, b) => (!a || !b ? a === b : Math.abs(a.size - b.size) <= 1 && (!a.colour || !b.colour ? a.colour === b.colour : sameColour(a.colour, b.colour))) },
+    { key: 'divider', label: 'divider under the header', show: (v) => v, eq: (a, b) => a === b },
+    { key: 'join', label: 'rule above it', show: (v) => v, eq: (a, b) => a === b },
+    { key: 'gap', label: 'gap above', show: (v) => `${v}px`, eq: (a, b) => Math.abs(a - b) <= 2 },
+    { key: 'body', label: 'body padding', show: (v) => (v.top === v.left ? `${v.top}px` : `${v.top}px top, ${v.left}px left`),
+      eq: (a, b) => Math.abs(a.top - b.top) <= 2 && Math.abs(a.left - b.left) <= 2 },
+  ];
+  for (const stack of stacks) {
+    const looks = stack.map((c, i) => {
+      const prev = stack[i - 1];
+      return {
+        header: round(box(c.header).height),
+        chevron: chevronOf(c.header),
+        divider: lineOf(edge(getComputedStyle(c.header), 'Bottom')),
+        join: prev ? lineOf(edge(getComputedStyle(prev.el), 'Bottom') || edge(getComputedStyle(c.el), 'Top')) : undefined,
+        gap: prev ? round(box(c.el).top - box(prev.el).bottom) : undefined,
+        body: bodyPaddingOf(c) || undefined,
+      };
+    });
+    // The stack's look is what most of its members share (the first member's, on a tie); a member that
+    // differs from it is the finding.
+    const norm = {};
+    for (const p of PROPS_LOOK) {
+      const vals = looks.map((l) => l[p.key]).filter((v) => v !== undefined);
+      if (vals.length < 2) continue;
+      norm[p.key] = vals.reduce((best, v) => (vals.filter((x) => p.eq(x, v)).length > vals.filter((x) => p.eq(x, best)).length ? v : best), vals[0]);
+    }
+    stack.forEach((c, i) => {
+      const diffs = PROPS_LOOK.filter((p) => p.key in norm && looks[i][p.key] !== undefined && !p.eq(looks[i][p.key], norm[p.key]))
+        .map((p) => `${p.label} ${p.show(looks[i][p.key])} (the others: ${p.show(norm[p.key])})`);
+      if (diffs.length) {
+        flag('stack-mismatch', describe(c.el), `one of ${stack.length} collapsibles stacked here looks different: ${diffs.join('; ')} — blocks of one kind in one stack share one look`);
+      }
+    });
+  }
+
+  const shownOpen = shownCollapsibles.filter((c) => c.open).length;
+  const openCollapsibles = shownOpen;
+  const collapsibles = shownCollapsibles.length;
   const result = {
     tool: 'joins.js',
     source: location.href,

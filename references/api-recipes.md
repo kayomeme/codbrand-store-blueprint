@@ -495,7 +495,8 @@ a stack as a list of equals. One that looks different reads as an ad or a mistak
    it there. The gap above is part of the look: take its margin-top the same way. The ids in the doc's
    examples are examples, not this store's.
 3. **Send them on the placement, then read it back.** The ids it returns are the ones it renders
-   with. Say the block matches only when they equal the host's.
+   with. Say the block matches only when they equal the host's AND `scripts/joins.js` finds no
+   `stack-mismatch` on the page: equal ids have been measured rendering a different chevron.
 4. **When it cannot be matched** (the door predates it, or the doc gives no mapping for that
    surface), never ship a look-alike that differs. Place the block always visible (`display_type`
    `none`, in its own frame) or away from the stack, or ask the merchant which they want, and tell
