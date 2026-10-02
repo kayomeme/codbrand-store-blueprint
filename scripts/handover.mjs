@@ -76,6 +76,12 @@
  *      reversal with no reason reads like a mistake on the next run. (Checked only where the blueprint
  *      records it; see checkReversals().)
  *
+ *  14. THE SITE SEARCH ENGINES ARE TOLD TO SKIP. `discourage_search_engines: yes` (WordPress's
+ *      "Discourage search engines") puts noindex on every page and turns the sitemap off; nothing on
+ *      the store looks broken, and a launched store gets no search traffic. A WARNING to pass on, never
+ *      a failure: demo and dev sites stay hidden on purpose, and only the merchant decides. An older
+ *      plugin does not report it: then the state is UNKNOWN, never "visible".
+ *
  *  13. THE HAND-STYLED BLOCK. A custom block's content is markup, like a page's, and WordPress's own
  *      check accepts anything inside a Custom HTML block: hand-styled rows pass it, return 200, and
  *      then render unlike the rest of the store, with nothing the merchant can change from the block
@@ -2052,6 +2058,22 @@ async function main(base) {
   } else {
     line(true, 'a logged-out visitor gets the store');
     passed.push('the public sees the store');
+  }
+
+  /* ── the whole site's search visibility: told to the merchant, never changed here ──────────────── */
+  const searchHidden = me.body.discourage_search_engines;
+  if (searchHidden === 'yes') {
+    notes.push('THE WHOLE SITE IS HIDDEN FROM SEARCH ENGINES (`discourage_search_engines`: yes). Tell the merchant in plain\n' +
+      '    words: "your site is hidden from Google and other search engines; nothing looks broken, but a launched\n' +
+      '    store gets no search traffic while this is on. Turn it off at launch: COD Settings > Store > Store\n' +
+      '    Visibility." Offer to switch it off only when they say they are launching and your key holds\n' +
+      '    `search_visibility`; never change it on your own. A demo or development site stays hidden on purpose.');
+  } else if (searchHidden === 'no') {
+    // Not in the pass summary: on a demo or development site, open to search engines is not a pass.
+    line(true, 'search engines may index the whole site (`discourage_search_engines`: no)');
+  } else {
+    notes.push('search visibility UNKNOWN: this plugin does not report `discourage_search_engines`. Do not tell the\n' +
+      '    merchant the site is visible to search engines.');
   }
 
   if (unreadable.length) {

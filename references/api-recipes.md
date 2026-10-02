@@ -423,6 +423,10 @@ The docs cannot tell you the following:
   the correct value, because it states nothing.
 - **Leave `noindex` alone** on everything you built. It removes far more than the robots tag (the doc
   says what), and a small store has nothing to hide from search.
+- **The whole-site switch is a different thing.** `noindex` above is one page's setting;
+  `discourage_search_engines` (WordPress's "Discourage search engines") hides every page at once. You
+  change it only when the merchant asks: SKILL.md rows 0 and 10, and `/docs/store_settings` → "Hiding
+  the whole site from search engines".
 - **Check the store's `country_code`** on `stores`. Until it is set, product pages give search engines
   and link previews no price at all, whatever the seo design says.
 - **A shared link to a page with no featured image of its own previews with the store's logo**, and
