@@ -613,7 +613,8 @@ What the source actually does:
 **So `main_header_layout` is a design choice about WHERE the logo sits, never whether it appears.**
 Pick a layout because you want that arrangement. Read the live list from
 `GET section_manager/global_settings/header/{id}` → `settings_schema.main_header_layout.options`
-rather than assuming any particular value is still the shipped default.
+rather than assuming any particular value is still the shipped default. On phones the same choice is
+`main_header_mobile_layout` (below).
 
 ### Header height: what sets it depends on the layout
 
@@ -633,6 +634,11 @@ there changes with `main_header_layout`:
   a bare `60`) is worse: the plugin still counts it as set and zeroes the card design's padding, so the
   bar gets none at all. Use a real length, or no height.
 
+**These rules apply to each side with its own layout.** When phones have a layout of their own
+(`main_header_mobile_layout`, below), the plugin compiles desktop and phones apart: a `stacked` phone
+layout ignores `height` on phones while a one-row desktop keeps it, and the padding is zeroed only on a
+side whose layout is not `stacked`. So a desktop that looks right says nothing about the phone bar.
+
 The header's style door refuses `padding` on purpose, because padding belongs to the card design.
 Check the preset's `used_count` before you edit it: a card design can be shared, and new padding lands
 on every surface that uses it. If it is not the header's alone, create one for the header through
@@ -642,8 +648,8 @@ text designs (`main_nav_items_text_preset`, `end_menu_items_text_preset`). It ad
 every declaration, so the stuck bar's own background and text colour could no longer win.
 
 `handover.mjs` fails any header that sizes to its content (`stacked`, no height, or a height that is not
-a real length) without top and bottom padding on desktop or on phones, and a sticky header whose bar is
-not opaque once it sticks.
+a real length) without top and bottom padding on desktop or on phones, judging each side by its own
+layout, and a sticky header whose bar is not opaque once it sticks.
 
 *Added 21-09-2026: a build set `height:221px` on a stacked header whose card design had 0px vertical
 padding. The height did nothing, the style door refused padding, and the header shipped cramped.*

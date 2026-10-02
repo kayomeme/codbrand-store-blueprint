@@ -43,7 +43,8 @@
  *      space. With 0 vertical padding the nav row touches whatever comes next, while the height setting
  *      reads back exactly as written. Measured 21-09-2026: `height:221px` stored, a header about 103px
  *      tall on the page. A height that is not a real length (`auto`, `0`) is worse: the plugin still
- *      zeroes the card design's padding for it.
+ *      zeroes the card design's padding for it. Each side is judged by its own layout: phones can have
+ *      their own (`main_header_mobile_layout`), and the plugin compiles each side apart.
  *
  *   6. THE SEE-THROUGH STUCK HEADER. Once a sticky header sticks, whichever rule wins the cascade
  *      paints it. A transparent winner lets the page scroll visibly through the bar, and nothing at
@@ -105,7 +106,8 @@
  */
 
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
@@ -865,10 +867,27 @@ function hasVerticalPadding(map, guarded) {
 }
 
 /**
+ * Which layout each side of a header compiles with. Desktop — 768px and wider — is
+ * `main_header_layout`. Phones — below 768px — are `main_header_mobile_layout`, unless it is `same`
+ * (the default) or absent (an install that predates the key), when phones follow desktop.
+ */
+function headerLayouts(settings) {
+  const desktop = String(settings.main_header_layout ?? '');
+  const mobile = String(settings.main_header_mobile_layout ?? 'same');
+  const own = mobile !== '' && mobile !== 'same';
+  return { desktop, phones: own ? mobile : desktop, own };
+}
+
+/**
  * 5 — THE CRAMPED HEADER. Does every header that sizes to its content have vertical space, on desktop
  * and on phones?
  *
- * A header sizes to its content in three cases (generated_css.php: `height: fit-content`, then the
+ * EACH SIDE BY ITS OWN LAYOUT (headerLayouts()). With a phone layout the plugin compiles one pass per
+ * side, each in its own media query, and puts the padding guard in every pass whose layout is not
+ * `stacked` (generated_css.php: $layoutPasses, $paddingGuardMedia). With `same` there is one pass and
+ * this is exactly the old single-layout check. Mirrored, not improved.
+ *
+ * A side sizes to its content in three cases (generated_css.php: `height: fit-content`, then the
  * design's style, then the guard):
  *   a. `stacked`: it forces `height:auto` over any height and never gets the guard, so the bar is its
  *      two rows plus the card design's top and bottom padding.
@@ -876,30 +895,45 @@ function hasVerticalPadding(map, guarded) {
  *      only vertical space. The shipped `height:60px` avoids this; removing it re-opens it.
  *   c. a one-row layout whose height is not a real length (`auto`, `0`, a bare number): the plugin
  *      still counts it as set and zeroes the padding, so only !important padding survives.
- * A one-row layout with a real height has room and is not checked here.
+ * A one-row side with a real height has room and is not checked here.
  */
 function checkHeaderVerticalSpace(headers, presetsById) {
   const problems = [];
   let checked = 0;
   for (const d of headers) {
-    const stacked = String(d.settings.main_header_layout ?? '') === 'stacked';
     const style = d.settings.main_header_container_style ?? '';
-    if (!stacked && headerHasFixedHeight(style)) continue;
-    checked++;
-    // generated_css.php:31 never emits the guard for `stacked`.
-    const guard = stacked ? '' : pluginHeightGuardValue(style);
+    const heightValue = pluginHeightGuardValue(style);
+    const fixed = headerHasFixedHeight(style);
+    const layouts = headerLayouts(d.settings);
     const id = Number(d.settings.main_header_container_preset ?? 0);
     const preset = presetsById.get(String(id));
     const at = presetAt(preset);
-    const flat = [];
-    for (const [bp, map] of [['desktop', at?.desktop], ['phones', at?.phone]]) {
-      if (!map || !hasVerticalPadding(map, guard !== '')) flat.push(bp);
-    }
-    if (!flat.length) continue;
 
-    if (guard !== '') {
+    // The sides each case leaves without vertical space: `guard` (a one-row side whose height is not a
+    // real length), `stacked`, `noHeight` (a one-row side with no height).
+    const flatIn = { guard: [], stacked: [], noHeight: [] };
+    let judged = false;
+    for (const [side, map] of [['desktop', at?.desktop], ['phones', at?.phone]]) {
+      const stacked = layouts[side] === 'stacked';
+      if (!stacked && fixed) continue;
+      judged = true;
+      // generated_css.php never emits the guard for a `stacked` pass.
+      const guarded = !stacked && heightValue !== '';
+      if (map && hasVerticalPadding(map, guarded)) continue;
+      flatIn[guarded ? 'guard' : stacked ? 'stacked' : 'noHeight'].push(side);
+    }
+    if (judged) checked++;
+
+    // With a phone layout of its own, say which key gave each side its layout. With `same` the message
+    // is the single-layout one, unchanged.
+    const lead = (flat) => (layouts.own
+      ? `${d.label} (${flat.map((side) => `${side}: \`${side === 'phones' ? 'main_header_mobile_layout' : 'main_header_layout'}\` is \`${layouts[side]}\``).join(', ')})`
+      : d.label);
+
+    if (flatIn.guard.length) {
+      const flat = flatIn.guard;
       problems.push(
-        `${d.label}: the header's height is \`${guard}\`, which gives the bar no height of its own on ${flat.join(' or on ')}, ` +
+        `${lead(flat)}: the header's height is \`${heightValue}\`, which gives the bar no height of its own on ${flat.join(' or on ')}, ` +
         'yet the plugin still counts it as a set height.\n' +
         '      Any height value switches on the rule that zeroes the card design\'s top and bottom padding,\n' +
         '      a rule meant for a fixed-height bar. So this bar is only as tall as its content, with no\n' +
@@ -907,31 +941,36 @@ function checkHeaderVerticalSpace(headers, presetsById) {
         '      the card design padding-top and padding-bottom in css_default AND css_mobile. See\n' +
         '      api-recipes.md → "Header height: what sets it depends on the layout".'
       );
-      continue;
     }
 
-    const why = !preset
+    const why = (flat) => (!preset
       ? `it points at card design #${id}, which does not exist on this install, so nothing pads it`
       : !at
         ? `its card design #${id} "${preset.title}" is switched off (is_active "${preset.is_active}"), so it compiles no CSS at all`
         : `its card design #${id} "${preset.title}" sets no top or bottom padding on ${flat.join(' or on ')} ` +
-          `(css_default \`${preset.css_default || '—'}\`, css_mobile \`${preset.css_mobile || '—'}\`)`;
-    problems.push(stacked
-      ? `${d.label}: the header layout is \`stacked\`, and ${why}.\n` +
+          `(css_default \`${preset.css_default || '—'}\`, css_mobile \`${preset.css_mobile || '—'}\`)`);
+    if (flatIn.stacked.length) {
+      problems.push(
+        `${lead(flatIn.stacked)}: the header layout is \`stacked\`, and ${why(flatIn.stacked)}.\n` +
         '      A stacked header ignores `height` and sizes to its two rows, so the card design\'s top and\n' +
         '      bottom padding is the ONLY vertical space it has. Without it the logo sits on the bar\'s top\n' +
         '      edge and the nav row touches whatever comes next, while the height reads back as written.\n' +
         '      Give the card design padding-top and padding-bottom in css_default AND css_mobile. Check its\n' +
         '      used_count first: if it is shared, create a card design for the header alone. See\n' +
         '      api-recipes.md → "Header height: what sets it depends on the layout".'
-      : `${d.label}: the header has no height, so it sizes to its content, and ${why}.\n` +
+      );
+    }
+    if (flatIn.noHeight.length) {
+      problems.push(
+        `${lead(flatIn.noHeight)}: the header has no height, so it sizes to its content, and ${why(flatIn.noHeight)}.\n` +
         '      With no height the bar is only as tall as its content plus the card design\'s top and\n' +
         '      bottom padding, the same as a stacked header. Without that padding the logo sits on the\n' +
         '      bar\'s top edge and the nav row touches whatever comes next. Give the card design\n' +
         '      padding-top and padding-bottom in css_default AND css_mobile (check its used_count first:\n' +
         '      if it is shared, create a card design for the header alone), or set a height again: the\n' +
         '      shipped value is 60px. See api-recipes.md → "Header height: what sets it depends on the layout".'
-    );
+      );
+    }
   }
   return { checked, problems };
 }
@@ -1563,12 +1602,19 @@ async function rowsFor(call, R, ctx, spec, productsRead) {
 
 /* ── 13. custom blocks: content, checked like a page ───────────────────────────────────────────── */
 
-/** `codbrand-content-builder`'s validator, found in the same two places, in the same order, that
- *  preflight.mjs looks for the skill. Its validator is the only check that looks INSIDE a Custom
- *  HTML block, which WordPress's own check accepts whatever it holds. */
+/** `codbrand-content-builder`'s validator — the only check that looks INSIDE a Custom HTML block,
+ *  which WordPress's own check accepts whatever it holds. Looked for BESIDE THIS SKILL first: the two
+ *  are installed side by side (`<skills>/codbrand-store-blueprint/scripts/handover.mjs` and
+ *  `<skills>/codbrand-content-builder/`), so the copy installed with this blueprint is found from any
+ *  working folder — the path as invoked (a linked install keeps its own) and as resolved. Then the two
+ *  places preflight.mjs looks: the home skills folder and the working folder's. Measured: run from a
+ *  folder with no `.claude/skills/`, the check reported every block NOT CHECKED with the skill
+ *  installed. */
 function findContentBuilderValidator() {
   const home = process.env.HOME || process.env.USERPROFILE || '';
-  for (const root of [join(home, '.claude', 'skills', 'codbrand-content-builder'),
+  const beside = [process.argv[1], fileURLToPath(import.meta.url)].filter(Boolean)
+    .map((p) => join(dirname(dirname(dirname(resolve(p)))), 'codbrand-content-builder'));
+  for (const root of [...beside, join(home, '.claude', 'skills', 'codbrand-content-builder'),
     join(process.cwd(), '.claude', 'skills', 'codbrand-content-builder')]) {
     if (!existsSync(join(root, 'SKILL.md'))) continue;
     const script = join(root, 'scripts', 'validate_pattern.mjs');
