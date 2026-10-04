@@ -620,6 +620,36 @@ Pick a layout because you want that arrangement. Read the live list from
 rather than assuming any particular value is still the shipped default. On phones the same choice is
 `main_header_mobile_layout` (below).
 
+### Phones can have their own layout
+
+`main_header_layout` is the layout on tablets and larger (768px and wider). `main_header_mobile_layout`
+is the layout on phones only (below 768px): the same layouts, plus `same`, the default, which keeps one
+layout at every width. The plugin compiles each side in its own media query, so the rules on this page
+(where the logo sits, the height below) apply to each side with its own layout. Read
+`/docs/header_global_settings` → "A different layout on phones" before you set it: a drawer on one side
+only, and `main_nav_hide_on_mobile`, have rules of their own. An install that predates the key has one
+layout at every width.
+
+**Choosing it is your call, like the desktop layout, and the logo is the reason.** On a phone the logo
+shares one short row with the menu and the end zone (cart, buttons). Give phones their own layout when
+the logo would not show properly in the desktop arrangement; keep `same` when it does. When the
+reference was measured at 390, its phone header is the specification: copy its arrangement. Record the
+reason in the blueprint's `why`.
+
+On a phone, the menu links that do not fit fold into a "More" button. What each layout then shows:
+
+| phone layout | what a phone shows |
+|---|---|
+| `logo_center` | one row: the menu button, the logo centred, the end zone. The usual phone header |
+| `drawer_logo_start`, `drawer_logo_end` | one row: the logo at the start or at the end, the whole menu behind its button |
+| `inline`, `nav_center` | one row: the logo at the start, then the links that fit and the "More" button |
+| `stacked` | two rows: the logo centred on its own row, then the menu and the end zone. A taller header |
+
+Check it at 390 in the browser pass (the logo at its full size, nothing clipped, the menu reachable)
+**with a phone's User-Agent** (the browser's device emulation), not a desktop window made narrow: the
+plugin always turns the "More" fold on for a phone's User-Agent, but for a desktop browser only with some
+settings, so a narrow desktop window can show every link wrapping in the row instead.
+
 ### Header height: what sets it depends on the layout
 
 `header.height` is one of the rows `match.mjs` compares with the reference. The setting that gets you
@@ -639,7 +669,7 @@ there changes with `main_header_layout`:
   bar gets none at all. Use a real length, or no height.
 
 **These rules apply to each side with its own layout.** When phones have a layout of their own
-(`main_header_mobile_layout`, below), the plugin compiles desktop and phones apart: a `stacked` phone
+(`main_header_mobile_layout`, above), the plugin compiles desktop and phones apart: a `stacked` phone
 layout ignores `height` on phones while a one-row desktop keeps it, and the padding is zeroed only on a
 side whose layout is not `stacked`. So a desktop that looks right says nothing about the phone bar.
 
