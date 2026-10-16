@@ -9,14 +9,18 @@
  * Run it on every page you changed, at 1440×900 and 390×844, and on a page with collapsibles (a size
  * guide, an order summary, an FAQ) ONCE WITH EVERY ONE OPEN AND ONCE WITH EVERY ONE CLOSED — a closed
  * block draws its borders somewhere else than an open one. It reads `open_collapsibles` back to you so
- * you can see which state you measured.
+ * you can see which state you measured. Then once more with each overlay open (the cart drawer, the
+ * checkout popup, a quick view): what an overlay holds is checked only while it is open. Set
+ * `window.CL_JOINS_RHYTHM = { stack, section }` first, the store's two spacing steps, for off-rhythm.
  *
  * WHAT IT FLAGS — each one survives every per-setting check and every screenshot of a block alone:
  *
  *   touching-boxes      two visible boxes stacked one on the other with 0px between them, where at
- *                       least one draws a border on that side or their backgrounds differ. Measured:
- *                       an order summary switched on sat flush on the form box below it, its closed
- *                       state drawing its bottom border along the box's top edge.
+ *                       least one draws a border (or casts a shadow) on that side or their backgrounds
+ *                       differ. Measured: an order summary switched on sat flush on the form box below
+ *                       it, its closed state drawing its bottom border along the box's top edge. Not a
+ *                       seam: a lower box's own divider with clear space on both sides of it, and the
+ *                       edge of a transparent section that keeps its content 24px away.
  *   stacked-dividers    two horizontal rules (a top/bottom border with no side borders, or an <hr>)
  *                       within 24px of each other, from two different boxes — or a rule within 12px of
  *                       a bordered box's edge. Two bordered cards 16px apart are a list, not this. Measured:
@@ -29,6 +33,13 @@
  *                       `certain: false` — "could not tell", never "clean".
  *   dead-anchor         an in-page link `href="#id"` whose target is not on the page, or is hidden.
  *                       Measured: a summary linking to a shipping block that was switched off.
+ *   soft-image          a photo whose file has too few pixels for the box it is drawn in, on this screen
+ *                       or on a 2× phone (Lighthouse's rule). Measured: a product gallery drawing 800px
+ *                       photos 710px wide, soft on every phone. Scroll the page through first, so lazy
+ *                       photos have loaded.
+ *   off-rhythm          two cards or sections stacked in one column whose gap is neither of the store's
+ *                       two spacing steps (only with CL_JOINS_RHYTHM set). Measured: 0, 4 and 41px
+ *                       between the blocks of one checkout popup.
  *   stack-mismatch      collapsibles lined up one under another (a product's description and
  *                       specifications, and a block placed with them) that do not share one look:
  *                       header height, chevron size and colour, the divider under the header, the rule
@@ -91,6 +102,15 @@
   const findings = [];
   const flag = (check, where, detail, extra = {}) => findings.push(Object.assign({ check, where, detail }, extra));
 
+  // A visible box-shadow is an edge as well: a card drawn only by its shadow ends exactly where a border
+  // would. Measured: a borderless white summary card, outlined by `box-shadow: 0 1px 3px` alone, sat
+  // flush on the form below it, and no border on the seam meant nothing was reported.
+  const shadowEdge = (cs) => {
+    if (!cs.boxShadow || cs.boxShadow === 'none') return null;
+    const c = parseColour((cs.boxShadow.match(/rgba?\([^)]*\)/) || [])[0]);
+    return c && c.a > 0.05 ? { w: 1, c, shadow: true } : null;
+  };
+
   // ── the boxes: visible, reasonably wide, not fixed to the screen ──────────────────────────────
   const minWidth = Math.min(200, W * 0.5);
   const boxes = qa('body *').filter((el) => {
@@ -101,9 +121,35 @@
     return r.width >= minWidth && r.height >= 16;
   }).map((el) => {
     const cs = getComputedStyle(el);
-    return { el, r: box(el), top: edge(cs, 'Top'), bottom: edge(cs, 'Bottom'), sides: !!(edge(cs, 'Left') && edge(cs, 'Right')),
-      bg: paints(cs) ? parseColour(cs.backgroundColor) : null };
+    const shadow = shadowEdge(cs);
+    return { el, r: box(el), top: edge(cs, 'Top') || shadow, bottom: edge(cs, 'Bottom') || shadow,
+      sides: !!(edge(cs, 'Left') && edge(cs, 'Right')) || !!shadow, bg: paints(cs) ? parseColour(cs.backgroundColor) : null };
   });
+  // How far from an element's top or bottom edge the first thing drawn inside it sits: text, a replaced
+  // element or control, a descendant's top or bottom border and, with `withPaint`, a descendant's
+  // background. Infinity when it draws nothing.
+  const gapTo = (el, side, withPaint) => {
+    const r = box(el);
+    let best = Infinity;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      let rr = null;
+      if (n.nodeType === 3) {
+        if (!n.nodeValue.trim() || !isShown(n.parentElement)) continue;
+        const range = document.createRange();
+        range.selectNodeContents(n);
+        rr = range.getBoundingClientRect();
+      } else {
+        if (!isShown(n)) continue;
+        const cs = getComputedStyle(n);
+        if (/^(IMG|SVG|VIDEO|CANVAS|INPUT|SELECT|TEXTAREA|BUTTON|IFRAME|HR)$/i.test(n.tagName) || edge(cs, 'Top') || edge(cs, 'Bottom')
+          || (withPaint && paints(cs))) rr = n.getBoundingClientRect();
+      }
+      if (!rr || !rr.width || !rr.height) continue;
+      best = Math.min(best, side === 'top' ? rr.top - r.top : r.bottom - rr.bottom);
+    }
+    return best;
+  };
   const overlapX = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left);
   const related = (a, b) => a.el.contains(b.el) || b.el.contains(a.el);
   // The outermost edge-to-edge section around an element (below <body>), or null.
@@ -159,18 +205,30 @@
       // composition (in a boxed layout too, where every section is narrower than the window).
       const shared = commonWidth(a.el, b.el);
       if (!drawn && !(differ && a.r.width < shared * 0.9 && b.r.width < shared * 0.9)) continue;
+      // Two designed joins are not seams, measured on a store's every page: (1) THE LOWER BOX'S OWN
+      // DIVIDER — the only line on the seam is the top border of a box with no side borders (a rule
+      // across a band, like a footer's bottom bar), the box above is no card, and the content keeps 8px
+      // clear on both sides of the line; (2) A TRANSPARENT SECTION'S EDGE — the side that brings no line
+      // paints nothing there and keeps all it draws 24px away, the distance stacked-dividers allows
+      // between two lines. A seam where content sits on the line, or a card on a card, is still one.
+      const ownDivider = !a.bottom && !!b.top && !b.top.shadow && !b.sides && !a.sides && !(a.bg && a.r.width < b.r.width - 1)
+        && gapTo(a.el, 'bottom', false) >= 8 && gapTo(b.el, 'top', false) >= 8;
+      const clearBelow = !b.bg && !b.top && gapTo(b.el, 'top', true) >= 24;
+      const clearAbove = !a.bg && !a.bottom && gapTo(a.el, 'bottom', true) >= 24;
+      if (ownDivider || clearBelow || clearAbove) continue;
       seams.push({ a, b, y: round(a.r.bottom) });
     }
   }
-  // One finding per seam: the outermost pair meeting at that line.
-  const seen = new Set();
+  // One finding per seam: the outermost pair meeting at that line, once per box below it and the boxes
+  // nested in it (three cards over one pager, and the pager's arrows inside it, are one seam).
+  const reported = [];
   seams.sort((x, y) => (y.a.r.width * y.a.r.height + y.b.r.width * y.b.r.height) - (x.a.r.width * x.a.r.height + x.b.r.width * x.b.r.height));
+  const lineOn = (e, which) => (e ? `; the ${which} box ${e.shadow ? 'casts a shadow' : `draws a ${e.w}px ${which === 'upper' ? 'bottom' : 'top'} border`}` : '');
   for (const s of seams) {
-    const key = `${s.y}:${round(Math.max(s.a.r.left, s.b.r.left) / 40)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (reported.some((o) => Math.abs(o.y - s.y) <= 1 && (o.b === s.b || related(o.b, s.b)))) continue;
+    reported.push(s);
     flag('touching-boxes', `${describe(s.a.el)} → ${describe(s.b.el)}`,
-      `0px between them at y=${s.y + round(window.scrollY)}px${s.a.bottom ? `; the upper box draws a ${s.a.bottom.w}px bottom border` : ''}${s.b.top ? `; the lower box draws a ${s.b.top.w}px top border` : ''} — give one of them a margin, or set their spacing`);
+      `0px between them at y=${s.y + round(window.scrollY)}px${lineOn(s.a.bottom, 'upper')}${lineOn(s.b.top, 'lower')} — give one of them a margin, or set their spacing`);
   }
 
   // ── stacked-dividers ──────────────────────────────────────────────────────────────────────────
@@ -274,6 +332,70 @@
     if (!isShown(a)) continue;
     if (!target) flag('dead-anchor', describe(a), `links to #${id}, which is not on this page — a link to a block that is switched off goes nowhere`);
     else if (!isShown(target)) flag('dead-anchor', describe(a), `links to #${id}, which is on the page but hidden`);
+  }
+
+  // ── soft-image ────────────────────────────────────────────────────────────────────────────────
+  // Lighthouse's rule ("Serves images with low resolution"): an image drawn larger than 64px needs at
+  // least 0.75 file pixels per screen pixel, the screen density rounded down to 2, 1.5 or 1. The file's
+  // width is the srcset candidate the browser chose (its `w`) or, with no srcset, naturalWidth — never
+  // naturalWidth for a srcset image: the browser scales it by the candidate's density, so a 768px file
+  // can report 169. object-fit decides how the file fills its box. And whatever this screen is, an image
+  // whose LARGEST file gives less than 1.5 pixels per CSS pixel is soft on a 2× phone. Measured: a
+  // product gallery drawing 800px photos 710px wide, 1.13 file pixels per CSS pixel and nothing larger
+  // offered. An image not loaded yet (lazy, below the fold) is not judged: scroll the page through first.
+  const dpr = window.devicePixelRatio >= 2 ? 2 : window.devicePixelRatio >= 1.5 ? 1.5 : 1;
+  const candidatesOf = (img) => (img.getAttribute('srcset') || img.getAttribute('data-lazy-srcset') || img.getAttribute('data-srcset') || '')
+    .split(',').map((s) => s.trim().split(/\s+/)).filter((p) => p[0] && /^\d+w$/.test(p[1] || ''))
+    .map((p) => { let href = p[0]; try { href = new URL(p[0], location.href).href; } catch (e) { /* as written */ } return { href, w: parseInt(p[1], 10) }; });
+  for (const img of qa('img').filter((i) => isShown(i) && i.complete && i.naturalWidth > 0)) {
+    const r = box(img);
+    if (r.width <= 64 && r.height <= 64) continue;
+    const src = img.currentSrc || img.src;
+    if (/\.svg(\?|#|$)/i.test(src)) continue;
+    const cands = candidatesOf(img);
+    const chosen = cands.find((c) => c.href === src);
+    const fileW = chosen ? chosen.w : (cands.length ? null : img.naturalWidth);
+    if (!fileW) continue;
+    const fileH = fileW * (img.naturalHeight / img.naturalWidth);
+    const fit = getComputedStyle(img).objectFit;
+    const sx = fileW / r.width;
+    const sy = fileH / r.height;
+    const perCss = fit === 'cover' ? Math.min(sx, sy) : (fit === 'contain' || fit === 'scale-down') ? Math.max(sx, sy) : fit === 'none' ? 1 : Math.min(sx, sy);
+    const largest = Math.max(fileW, ...cands.map((c) => c.w));
+    const bestPerCss = perCss * (largest / fileW);
+    const name = src.split('/').pop().split('?')[0].slice(0, 60);
+    if (perCss < 0.75 * dpr) {
+      flag('soft-image', describe(img), `"${name}": a ${fileW}px file drawn ${round(r.width)}×${round(r.height)} gives ${perCss.toFixed(2)} file pixels per CSS pixel, below the ${0.75 * dpr} this ${dpr}× screen needs — serve a larger file`);
+    } else if (bestPerCss < 1.5) {
+      flag('soft-image', describe(img), `"${name}": the largest file offered (${largest}px) gives ${bestPerCss.toFixed(2)} file pixels per CSS pixel drawn ${round(r.width)}px wide — soft on a 2× phone; upload the photo at least ${Math.ceil(1.5 * largest / bestPerCss)}px wide`);
+    }
+  }
+
+  // ── off-rhythm ────────────────────────────────────────────────────────────────────────────────
+  // Only when you pass the store's spacing: `window.CL_JOINS_RHYTHM = { stack: 16, section: 72 }` before
+  // running this (the blueprint's density, palette.md → "Density"). Two cards or sections stacked in one
+  // column — siblings, at least one painting a background or an outline — sit the stack gap or the
+  // section gap apart (±2px); 0 is a join, which touching-boxes judges. Anything else is off the store's
+  // rhythm. Measured on one checkout: 0, 4 and 41px between blocks where the design had one 12/16px rhythm.
+  const rhythm = window.CL_JOINS_RHYTHM && Number(window.CL_JOINS_RHYTHM.stack) > 0 ? window.CL_JOINS_RHYTHM : null;
+  if (rhythm) {
+    const steps = [Number(rhythm.stack), Number(rhythm.section)].filter((n) => n > 0);
+    // Controls keep their component's own spacing (two buttons in a card), not the page's rhythm.
+    const control = (el) => /^(A|BUTTON|INPUT|SELECT|TEXTAREA|LABEL)$/.test(el.tagName) || el.getAttribute('role') === 'button';
+    const byEl = new Map(boxes.filter((b) => !control(b.el)).map((b) => [b.el, b]));
+    const parents = new Set(boxes.map((b) => b.el.parentElement).filter(Boolean));
+    for (const p of parents) {
+      const kids = Array.from(p.children).map((c) => byEl.get(c)).filter(Boolean).sort((x, y) => x.r.top - y.r.top);
+      for (let i = 1; i < kids.length; i++) {
+        const [a, b] = [kids[i - 1], kids[i]];
+        if (overlapX(a.r, b.r) < Math.min(a.r.width, b.r.width) * 0.5) continue;
+        if (!(a.bg || a.sides || b.bg || b.sides)) continue;
+        const gap = b.r.top - a.r.bottom;
+        if (gap <= 0.5 || steps.some((s) => Math.abs(gap - s) <= 2)) continue;
+        flag('off-rhythm', `${describe(a.el)} → ${describe(b.el)}`,
+          `${round(gap)}px between them at y=${round(a.r.bottom + window.scrollY)}px, off the store's rhythm (${steps.join(' / ')}px) — set the lower one's space above to a step`);
+      }
+    }
   }
 
   // ── stack-mismatch ────────────────────────────────────────────────────────────────────────────
@@ -389,12 +511,14 @@
     source: location.href,
     viewport: { width: window.innerWidth, height: window.innerHeight },
     collapsibles, open_collapsibles: openCollapsibles,
+    rhythm: rhythm ? { stack: Number(rhythm.stack), section: Number(rhythm.section) || null } : null,
     unreadable_stylesheets: unreadable,
     findings,
   };
   console.log(JSON.stringify(result, null, 2));
   console.info(`joins.js: ${findings.length} finding(s) at ${window.innerWidth}×${window.innerHeight}, ${openCollapsibles} of ${collapsibles} collapsible(s) open.`
     + (collapsibles ? ' Run it again with every collapsible in the other state.' : '')
+    + (rhythm ? '' : ' Spacing NOT checked: set window.CL_JOINS_RHYTHM = { stack, section } (the store\'s density) and run it again.')
     + (unreadable.length ? `\n${unreadable.length} stylesheet(s) could not be read (another origin): a browser-default finding is marked certain: false.` : ''));
   return result;
 })();

@@ -171,10 +171,25 @@ their joins. Latin-script Darija uses a Latin family normally.
 ## Density
 
 One decision, applied consistently: **airy** (Caregiver, Ruler, Lover) · **structured** (Sage) ·
-**denser** (Everyman) · **punchy** (Magician).
+**denser** (Everyman) · **punchy** (Magician). Keep it consistent — an airy palette on dense spacing
+reads as a mistake rather than a choice.
 
-It drives container padding, card padding, gaps and the radius scale. Keep it consistent — an airy
-palette on dense spacing reads as a mistake rather than a choice.
+It is FOUR NUMBERS, not a word. When a reference was measured, take them from it; otherwise from its
+density, on the 8px grid most design systems space by:
+
+| density | edge inset (desktop / phone) | stack: between blocks of one section | section: between sections | radius |
+|---|---|---|---|---|
+| airy | 64 / 20 | 24 | 96 | 12 |
+| structured | 48 / 16 | 16 | 64 | 6 |
+| denser | 32 / 16 | 12 | 48 | 8 |
+| punchy | 40 / 16 | 16 | 56 | 16 |
+
+Record them in the blueprint's `density` with where they came from. There is no spacing setting of
+its own: write them into the settings that exist — a block's space above it is its container `*_style`
+`margin-top`, a card's inside space and corners are its preset's padding and radius, in `css_default`
+and `css_mobile`. Then check them: run `scripts/joins.js` with `window.CL_JOINS_RHYTHM = { stack, section }`
+set first, and it reports every gap between cards or sections that is neither. *Measured on one build,
+with the word and no numbers: 0, 4 and 41px between the blocks of one checkout.*
 
 ## Icon style
 

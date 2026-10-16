@@ -192,6 +192,8 @@
   // a 39px sister-brand icon in the top strip was taken for the logo.
   const LOCALE = /^[a-z]{2}(?:[-_][a-z]{2})?$/i;
   const isHomeLink = (a) => {
+    const raw = a.getAttribute('href');
+    if (raw === null || /^\s*#?\s*$/.test(raw)) return false;
     try {
       const u = new URL(a.href, location.href);
       const parts = u.pathname.split('/').filter(Boolean);
@@ -200,6 +202,7 @@
       return false;
     }
   };
+  const attrKind = (el) => { const k = kindOf(Array.from(el.attributes || []).map((x) => x.name).join(' ')); return ['search', 'cart', 'account', 'wishlist'].includes(k) ? k : ''; };
   const SOCIAL = /(facebook|fb\.com|instagram|tiktok|twitter|x\.com|youtube|youtu\.be|pinterest|linkedin|snapchat|wa\.me|whatsapp|threads\.net|telegram|t\.me)/i;
   /** What a header control says it is — from its label, title, class, id, link, its own (often
    *  visually hidden) text, or its icon font's class: "Search", "Wishlist", "icon-heart". */
@@ -207,7 +210,7 @@
     const glyph = el.querySelector('i[class], [class*="icon"]');
     return kindOf([el.getAttribute('aria-label'), el.title, el.className, el.id, el.getAttribute('href'), (el.textContent || '').slice(0, 60),
       glyph ? String(glyph.className) : '',
-      el.getAttribute('data-open-cart') ? 'cart' : '', el.getAttribute('data-open-search') ? 'search' : ''].join(' '));
+      el.getAttribute('data-open-cart') ? 'cart' : '', el.getAttribute('data-open-search') ? 'search' : '', attrKind(el)].join(' '));
   };
   const kindOf = (words) => {
     const s = words.toLowerCase();
@@ -421,11 +424,15 @@
       // A full-width band at the very top, above the logo row, holding some text — never the header
       // itself, nor anything around it.
       const logoTop = logoLink ? box(logoLink).top : (headerEl ? box(headerEl).top + 24 : 120);
-      topbarEl = qa('body *').filter((el) => {
+      const bands = qa('body *').filter((el) => {
         const r = box(el);
         return r.top <= 2 && r.width >= W * 0.9 && r.height >= 18 && r.height <= 70 && r.bottom <= logoTop + 2
           && text(el).length > 3 && isShown(el) && !(logoLink && el.contains(logoLink)) && !(headerEl && el.contains(headerEl));
-      }).sort((a, b) => box(b).height - box(a).height)[0] || null;
+      });
+      const tallest = bands.reduce((m, el) => Math.max(m, box(el).height), 0);
+      const paints = (el) => { const cs = getComputedStyle(el); return cs.backgroundImage !== 'none' || (parseColour(cs.backgroundColor) || { a: 0 }).a >= 0.99; };
+      const bar = bands.filter((el) => box(el).height >= tallest - 2);
+      topbarEl = bar.find(paints) || bar[0] || null;
     }
     add('topbar.present', !!topbarEl);
     if (!topbarEl) {
@@ -477,6 +484,8 @@
     // menu was <a> buttons in <div>s while its only <nav> elements were hidden dropdowns; another had a
     // white menu row above a black category bar, and "the <nav> with the most links" picked the bar. The
     // logo, a filled call-to-action button and an icon control (cart, account…) are never menu items.
+    const CONTROL_PATH = /^\/(?:[a-z]{2}(?:[-_][a-z]{2})?\/)?(?:account|my-account|login|register|cart|basket|search|wishlist)(?:\/|$)/i;
+    const controlHref = (a) => { const raw = a.getAttribute('href'); if (!raw) return false; try { const u = new URL(raw, location.href); return u.origin === location.origin && CONTROL_PATH.test(u.pathname); } catch (e) { return false; } };
     const referenceMenu = () => {
       const logoTop = logoLink && isShown(logoLink) ? box(logoLink).top : -Infinity;
       const menuItem = (a) => isShown(a) && text(a) && text(a).length <= 40
@@ -485,14 +494,14 @@
         // 80px buttons from y=46, the logo from y=62), and every one was dropped by its top.
         && !(topbarEl && topbarEl.contains(a)) && (box(a).top + box(a).bottom) / 2 >= logoTop - 10
         && !((parseColour(getComputedStyle(a).backgroundColor) || { a: 0 }).a > 0)
-        && !(q('svg, img', a) && (nameOf(a) !== 'other' || text(a).length <= 2));
+        && !(q('svg, img', a) && (nameOf(a) !== 'other' || text(a).length <= 2)) && !controlHref(a);
       // A visible <nav> first — even of one link — and of several, the TOP-MOST, not the fullest.
       const navs = (headerEl.tagName === 'NAV' ? [headerEl] : qa('nav', headerEl))
-        .map((n) => qa('a', n).filter(menuItem)).filter((links) => links.length)
+        .map((n) => qa('a, button, summary', n).filter(menuItem)).filter((links) => links.length)
         .sort((x, y) => Math.min(...x.map((a) => box(a).top)) - Math.min(...y.map((a) => box(a).top)));
       if (navs.length) return navs[0].sort((a, b) => startGap(a) - startGap(b));
       // No usable <nav>: the first row of at least three menu links, wherever they sit.
-      const items = qa('a', headerEl).filter(menuItem);
+      const items = qa('a, button, summary', headerEl).filter(menuItem);
       const lines = [];
       for (const a of items) {
         const c = (box(a).top + box(a).bottom) / 2;
@@ -500,7 +509,8 @@
         if (!line) lines.push(line = { c, links: [] });
         line.links.push(a);
       }
-      const row = lines.filter((l) => l.links.length >= 3).sort((x, y) => x.c - y.c)[0];
+      const rowsTop = lines.sort((x, y) => x.c - y.c);
+      const row = rowsTop.find((l) => l.links.length >= 3) || rowsTop.find((l) => l.links.length >= 2);
       return row ? row.links.sort((a, b) => startGap(a) - startGap(b)) : [];
     };
     const referenceLinks = pluginStore ? [] : referenceMenu();
@@ -600,7 +610,7 @@
     // hover with no link of its own — kept when its id or class names what it is ("user-menu-account").
     const ICON = 'svg, img, i, [class*="icon"]';
     const CONTROL = ['search', 'cart', 'account', 'wishlist'];
-    const hoverControls = qa('div, span, li', headerEl).filter((el) => CONTROL.includes(kindOf(`${el.id} ${el.className}`)) && box(el).width <= 200 && box(el).height <= 80
+    const hoverControls = qa('div, span, li, p', headerEl).filter((el) => (CONTROL.includes(kindOf(`${el.id} ${el.className}`)) || attrKind(el)) && box(el).width <= 200 && box(el).height <= 80
       && !qa('a, button', el).some(isShown));
     // The label counted is the one a visitor sees: a screen-reader label (a 1px box) can hold anything
     // (measured 28-09-2026: "inline-block ml-1 no-underline … Cart", 62 characters, dropped the cart).
@@ -923,7 +933,15 @@
   const productIds = ['product.gallery_ratio', 'product.gallery_width', 'product.title_font_size', 'typography.product_title_family',
     'product.info_position', 'product.thumbs_position', 'product.gallery_background'];
   section(productIds, () => {
-    const ldProduct = qa('script[type="application/ld+json"]').some((s) => /"@type"\s*:\s*\[?\s*"Product"/.test(s.textContent));
+    const ldProduct = qa('script[type="application/ld+json"]').some((s) => {
+      if (!/"@type"\s*:\s*\[?\s*"Product"/.test(s.textContent)) return false;
+      try {
+        const nodes = [];
+        const walk = (o) => { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { nodes.push(o); Object.values(o).forEach(walk); } };
+        walk(JSON.parse(s.textContent));
+        return nodes.some((o) => [].concat(o['@type']).includes('Product') && typeof o.name === 'string' && o.name.trim() !== '');
+      } catch (e) { return true; }
+    });
     const ogType = (q('meta[property="og:type"]') || { content: '' }).content;
     // A reference built with a page builder often declares nothing (measured: fassiano.com's product
     // pages are plain Elementor pages, og:type "article"), so the agent can say it: CL_MEASURE_PAGE.
@@ -948,7 +966,7 @@
       return right - left >= r.width * 0.9;
     };
     const candidates = pluginStore ? [] : qa('img').filter((i) => isShown(i) && onScreen(i) && !inChrome(i)
-      && box(i).top + window.scrollY < H * 2 && box(i).width >= 120);
+      && box(i).top + window.scrollY < H && box(i).width >= 120);
     const main = pluginStore
       ? (qa('.cl-gallery-slide.active img', gallery).find(isShown) || qa('img', gallery).filter(isShown).sort((a, b) => area(b) - area(a))[0])
       : candidates.sort((a, b) => area(b) - area(a))[0];
@@ -1000,11 +1018,13 @@
       // share logo on the right was counted with them. On a reference, within one image-width of the main
       // photo and not the title's block; a single stray image is not a strip.
       let thumbs = [];
+      let infoBlock = null;
+      if (title) for (let a = title.parentElement; a && a !== document.body && !a.contains(main); a = a.parentElement) infoBlock = a;
       if (!grid) {
         const near = (pluginStore ? qa('img', gallery) : qa('img').filter((i) => {
           const r = box(i);
           return !inChrome(i) && r.left >= m.left - m.width && r.right <= m.right + m.width
-            && r.top >= m.top - m.height && r.bottom <= m.bottom + m.height && !(title && title.parentElement && title.parentElement.contains(i));
+            && r.top >= m.top - m.height && r.bottom <= m.bottom + m.height && !(infoBlock ? infoBlock.contains(i) : (title && title.parentElement && title.parentElement.contains(i)));
         })).filter((i) => i !== main && isShown(i) && onScreen(i) && box(i).width <= m.width * 0.4
           // A thumbnail is a photo one can recognise: 40px or more. Around a large photo, the page's own
           // icons (quantity buttons, badges, 12–32px) outnumbered three 65px thumbnails (measured 28-09-2026).

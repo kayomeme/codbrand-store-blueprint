@@ -128,7 +128,7 @@ The archetype list is deliberately dynamic (see `archetypes.md`). A blueprint th
 | `palette` | 26 semantic slots, filled by role |
 | `fonts` | `{ "heading": …, "body": … }` |
 | `icon_style` | the icon family |
-| `density` | spacing/scale character |
+| `density` | the four spacing numbers — edge inset, stack, section, radius — and where they came from (`palette.md` → "Density") |
 | `page_list` | which pages this store needs, and why each |
 | `page_structure` | per page: purpose, sections, what each section needs |
 | `copy` | the translatable settings keys, in their language |

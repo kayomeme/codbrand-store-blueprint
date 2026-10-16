@@ -170,7 +170,7 @@ re-uploading and re-pointing every product.
 | 1 | **Every product has a featured image** | the listing card, the cart line and every share preview fall back to nothing without it |
 | 2 | **Every product has at least 2 gallery images** (4 until 20-09-2026 — see `handover.mjs`) | a product page with one photo reads as a placeholder listing, and a COD shopper being asked to hand over cash at the door is already looking for a reason not to |
 | 3 | **One aspect ratio**, matched to the listing's image box | the most visible defect a build can ship, and no status code reveals it — the grid crops each card differently and stops lining up |
-| 4 | **One format and one long-edge pixel size** | mixed formats mean mixed compression behaviour; mixed sizes mean different sharpness in one grid |
+| 4 | **One format and one long-edge pixel size**, at least twice the widest the photo is drawn — the product gallery at 1440 draws about 700px, so 1400px | mixed formats mean mixed compression behaviour; mixed sizes mean different sharpness in one grid; a file smaller than twice its box is soft on every 2× phone (`joins.js` → soft-image) |
 
 **Measured on the plugin's own demo store, which is why these are invariants and not advice:** 20/20
 products had a featured image, **0/20 had a gallery of four**, seven had none at all, and **20 of 34
