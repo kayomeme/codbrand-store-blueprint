@@ -23,6 +23,12 @@ width: `--reference reference-1440.json --live live-1440.json`, then the same fo
 compare specs taken at different widths, so the two cannot be mixed by accident. Every dimensional row
 is a function of the width it was measured at, and a COD store's customers are mostly on a phone.
 
+**When the browser cannot reach 1440×900** (a small screen caps the window), measure BOTH sides at the
+largest size it reaches, in the same window, and say which size in your report: `match.mjs` compares
+any two specs taken at one size. For the phone width use the browser's device emulation — a phone's
+width and User-Agent — on both sides, never a desktop window made narrow: the plugin switches parts of
+a phone's page on the User-Agent, so a narrowed desktop window is not what a phone gets.
+
 *Measured 21-09-2026: a build matched at 1440 only. Both defects the merchant then reported on a phone
 — a footer band flush against its text, a product grid with crushed buttons — sat outside anything
 the match had measured.*

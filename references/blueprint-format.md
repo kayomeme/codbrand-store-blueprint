@@ -121,7 +121,7 @@ The archetype list is deliberately dynamic (see `archetypes.md`). A blueprint th
 |---|---|
 | `brand_name` | the name as it should appear |
 | `niche` | what they sell, in their words |
-| `language` | `{ "code": "fr", "script": "latin", "dialect": "Moroccan Darija" }` — see below |
+| `language` | `{ "code": "fr_FR", "script": "latin", "dialect": "Moroccan Darija" }` — see below |
 | `market` | ISO country, for currency and delivery conventions |
 | `contact` | whatsapp / phone / email — whichever they gave |
 | `archetype` | `{ "primary": …, "secondary": … }`, 70/30 |
@@ -133,6 +133,11 @@ The archetype list is deliberately dynamic (see `archetypes.md`). A blueprint th
 | `page_structure` | per page: purpose, sections, what each section needs |
 | `copy` | the translatable settings keys, in their language |
 | `features` | the FEATURE CHECKLIST as they left it — `{ "reviews": "on", "countdown": "off", … }` |
+| `presets` | the presets you created or restyled, by name, each with its `why` |
+| `icons` | the icons you created, by name, each with its `why` |
+| `delivery` | the delivery fee and options the merchant agreed to, free-over-X included |
+| `checkout` | how the cart and the checkout open (drawer, popup or page), and why |
+| `references` | the reference site or the three niche stores measured, with the widths measured at |
 
 ### `features` — record what they UNTICKED, or a re-run re-offers it
 
@@ -158,7 +163,7 @@ reported as not reconciled rather than checked. The settings behind each row are
 ### `language` carries a script, and it is not decoration
 
 ```jsonc
-"language": { "value": { "code": "ar", "script": "latin", "dialect": "Moroccan Darija" } }
+"language": { "value": { "code": "fr_FR", "script": "latin", "dialect": "Moroccan Darija" } }
 ```
 
 **Reading direction follows the SCRIPT, never the language.** Darija written in Latin letters —
@@ -166,9 +171,11 @@ reported as not reconciled rather than checked. The settings behind each row are
 Arabic script is RTL. Defaulting Arabic → RTL is wrong for the common Moroccan case.
 
 **`code` is chosen by SCRIPT, not by language** — it is what sets WordPress's locale, and that is what
-decides reading direction for the whole site. Of the six the plugin accepts, only `ar` is RTL; `en`,
-`fr`, `es`, `pt` and `it` are all LTR. So Latin-script Darija takes `fr` or `en`. Picking `ar`
-because the language is Arabic ships a mirrored store, and no direction setting overrides it.
+decides reading direction for the whole site. The codes a store accepts are its WordPress locales
+(`store_settings/available_languages`); `ar`, `he`, `fa`, `ur` and the other right-to-left languages
+turn the whole site RTL (`/docs/store_settings`). So Latin-script Darija takes `fr_FR` or `en_US`.
+Picking `ar` because the language is Arabic ships a mirrored store, and no direction setting
+overrides it.
 
 `dialect` is free text and is what the copy is actually written in — the plugin has no Darija entry
 and does not need one. That split is the point: `code` carries the *script*, `dialect` carries the
@@ -190,7 +197,7 @@ more than one store, **add new tokens and point at them** — never edit one ano
 
 ## Worked example
 
-Trimmed to three decisions; a real one carries all fourteen.
+Trimmed to three decisions; a real one carries all nineteen.
 
 ```jsonc
 {

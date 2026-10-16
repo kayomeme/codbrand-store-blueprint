@@ -90,25 +90,19 @@ a store. It grades in two bands: **required** pairs (body copy, the button label
 discount badge) fail the run; **advisory** pairs (muted captions and meta) only warn, because those
 are deliberately low-contrast in most designs.
 
-## ⚠️ The trap that silently deletes your styling
+## ⚠️ Each style key takes only its own properties
 
-The plugin runs a **StyleCleaner** on every admin settings save. It computes an allow-list from each
-style key's declared brushes and **strips any CSS property not on it**. The stripped value is then
-persisted.
+Every `*_style` key accepts a set of CSS properties of its own: read it on the design, in its
+`style_generator` → `allowed_properties` (`/docs/style_brushes`). The set is per key, never global, and
+an empty list takes any declaration. The designs door **refuses** a property outside the set with a
+`422` that names the allowed ones, and saves nothing. `store_settings` does not check: it stores the
+value with a `200`, and the next time the merchant saves that settings page in wp-admin the property
+is stripped. Symptom: *"the styles disappeared after I saved."*
 
-So a style can look perfect when you write it and vanish the first time the merchant opens that
-settings page and saves. Symptom: *"the styles disappeared after I saved."*
-
-Properties commonly assumed and **not** allowed: `gap` (unless declared), `letter-spacing`,
-`line-height`, `text-transform`, `text-decoration`, `cursor`, `transition`, `display`, `overflow`,
-`opacity`, `scrollbar-width`.
-
-**Stay on values the plugin already exposes** in a settings string — the cleaner deletes the rest.
-Anything exotic now has a proper home rather than needing a plugin change: STORE-LEVEL CUSTOM CSS
-(`PUT /stores/{id}/custom-code`, scope `stores_custom_code`) is hand-written, never passes through the
-cleaner, and applies to every page of the store. That is where `gap`, `letter-spacing`, `line-height`,
-`text-transform`, `text-decoration`, `cursor`, `transition`, `opacity` and `scrollbar-width` belong.
-Ask the api for `GET /docs/custom_code_css_js` before writing any.
+**Stay on the properties a key allows.** Anything else now has a proper home rather than needing a
+plugin change: STORE-LEVEL CUSTOM CSS
+(`PUT /stores/{id}/custom-code`, scope `stores_custom_code`) is hand-written, is never cleaned, and
+applies to every page of the store. Ask the api for `GET /docs/custom_code_css_js` before writing any.
 
 ⚠️ `stores_custom_code` is a SEPARATE permission from `stores_write`, and `preflight.mjs` will not
 catch a missing one — it probes read scopes only, by its own admission. A key that can restyle a store

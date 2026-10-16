@@ -27,7 +27,7 @@ things that fail quietly.**
 | 0 | read `/me`, then the store's current state | you cannot decide "fresh vs established" without it |
 | 0b | read the current blueprint (`?status=applied`) | tells your work from the merchant's |
 | 2 | measure the reference site, if they gave one | every decision below should follow measured values, not an impression |
-| 4 | **`store_settings`**, then **`stores/ensure_pages`**, then palette, fonts, icons | reading direction and the page width are what every design is laid out inside; **everything downstream references `var(--cl-*)`**; and the funnel is not reachable until its pages are wired |
+| 4 | **`store_settings`**, then **`stores/ensure_pages`**, then palette, fonts, icons, presets | reading direction and the page width are what every design is laid out inside; **everything downstream references `var(--cl-*)`**; and the funnel is not reachable until its pages are wired |
 | 5 | designs, copy, logo | needs the tokens to exist |
 | 6–7 | pages | needs the design, or the merchant judges copy by styling |
 | 8 | menus, nav, the front page (`is_front_page` on `pages`) | **needs the pages to exist** — and a menu id is not a designed header; that was phase 5 |
@@ -226,16 +226,28 @@ applies, not how strong it is: a plain selector keeps only its own weight, so a 
 first; when CSS is the only way, read `/docs/custom_code_css_js` → "Winning against the plugin's own
 CSS" — a written `:scope` adds the class you need.
 
+**A `*_style` setting loses to the preset on the same element.** A design's `*_style` and its
+`*_preset` often paint one element, and where both set a property the preset usually wins: the
+style's value is stored, compiled and never seen. So colour, type and shape go in the preset (clone it
+first when other surfaces use it) and the narrow `_style` keys keep to spacing. A write that collides
+answers with a `notice` naming the preset, and `handover.mjs` lists any still standing.
+`/docs/settings_vs_presets`
+
 **Design settings are per SM instance, and a store chooses which instance it uses.** Writing to an
 instance no store points at changes nothing visible. Resolve which instance the store actually uses
-before writing to it.
+before writing to it: `GET stores` → `renders` says which design each pointer shows. A design you
+create is linked to nothing until the store points at it (`stores` → `<type>_sm_id`); a pointer at 0
+shows the first active design of its type, which is rarely the one you styled.
 
 **Global tokens are shared.** Colours, fonts and presets live in one library across all stores.
 Adding is safe; **editing a token another store references restyles that store too.** On a
 multi-store install, add and point rather than edit.
 
-**Media dedupes by content hash**, so re-uploading the same bytes is safe and free. When you upload an
-image you generated, send `"source_type": "trainedAlgorithmicMedia"` — it is recorded with the image.
+**Media dedupes by content hash**, so re-uploading the same bytes is safe and free. Send `source_type`
+with every upload: where the image came from, recorded with it. A generated image is
+`trainedAlgorithmicMedia`; a photograph — stock, or a supplier's — is a capture. The codes are in
+`/docs/media_upload`. An HTML `403` page instead of JSON is the host's upload size limit: compress the
+file and send it again.
 
 **What you may remove — a hard rule.** Delete or replace only files YOU added (uploaded through the
 API) — images, videos, audio, PDFs. Any other file — one the merchant added — only when the merchant has
@@ -277,7 +289,8 @@ else; never send `"no"` as a tidy-up.
 - **Media** dedupes by content hash.
 - **Writes** accept an `Idempotency-Key` header; use one so a timeout is safe to retry.
 - **Blueprints** are versioned per store: each create is a new version, and applying one archives the
-  previous. That is the intended shape — do not try to overwrite a version in place.
+  previous. While you decide, PATCH the draft (`/docs/store_blueprint`); once a version is applied, a
+  change is a new version. Never PATCH an applied or archived one.
 
 ## Content
 

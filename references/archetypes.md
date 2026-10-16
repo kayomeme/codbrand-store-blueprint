@@ -146,7 +146,7 @@ LABEL for each one, because a merchant can judge the right column and not the le
 | `reviews` | **Customer reviews** — star ratings and review cards on the product page |
 | `qty_offers` | **Quantity discounts** — "buy 2, save 10%", shown as a choice on the product page |
 | `product_variations` | **Product options** — the same product in several sizes or colours |
-| `product_upsells` | **You may also like** — a strip of related products under the main one |
+| `product_upsells` | **Upsell offer** — products offered with the main one, with a reason to add them: "add this for 10% off" |
 | `quickview` | **Quick view** — open a product from the grid without leaving the page |
 | `stories` | **Stories** — tappable full-screen slides, like Instagram |
 | `coupons` | **Discount codes** — a code box at checkout |
@@ -171,18 +171,18 @@ Showing the checklist changes nothing on the store. **Apply it in phase 5**: swi
 merchant left ticked ON and every unticked one OFF. Then, in 5b, seed the rows each ticked feature
 needs, because most of them render nothing without rows.
 
-| checklist row | switched by (design type → setting) | needs behind it |
+| checklist row | switched by (design type → setting) | needs behind it, and what makes it work |
 |---|---|---|
 | Customer reviews | `product` → `reviews_is_active` | approved reviews (`reviews`) |
-| Quantity discounts | `product` → `qty_offers_is_active` | an active offer with at least two tiers (`qty_offers`) |
-| Product options | `product` → `variations_is_active`, AND the store row's own `variations_is_active` (`stores`); either one at `no` hides every option | options on the products (`product/variations`) |
-| You may also like | `product` → `p_upsell_is_active` | pairings, product by product (`product/upsells`) |
+| Quantity discounts | `product` → `qty_offers_is_active` | an active offer with at least two tiers and a saving on a tier above one unit (`qty_offers`), reaching the products the merchant meant. The seeded catalogue-wide offer ships switched off |
+| Product options | `product` → `variations_is_active`, AND the store row's own `variations_is_active` (`stores`); either one at `no` hides every option. On listing cards, also the listing design's (`plist1`) `variations_is_active` and `variations_included_slugs`, the option types the cards show; an empty list shows none (`/docs/plist1_global_settings`) | options on the products (`product/variations`) |
+| Upsell offer | `product` → `p_upsell_is_active` | pairings, product by product (`product/upsells`), and the reason to add them: a title the shopper reads (the `always_visible` display drops it), a saving they can see (the upsell's discount, or an upsold product on sale), card text where the cards show text (`upsell_description` on each upsold product). The saving is the merchant's promise: ask for it, never invent one |
 | Quick view | `plist1` → `quickview_bt_is_active`. For OFF, also `product` → `p_upsell_quickview_bt_is_active` and `thankyou` → `quickview_bt_is_active` | — |
 | Stories | `product` → `stories_is_active` (ships `no`) | active stories (`stories`) |
-| Discount codes | `cart` → `cart_coupon_is_active` (ships `no`); the same box also shows on checkout | active codes (`coupons`). The box shows with none, and no code typed into it can work |
+| Discount codes | `cart` → `cart_coupon_is_active` (ships `no`); the same box also shows on checkout | active codes (`coupons`), which a person creates in wp-admin: the api only reads them (`/docs/coupons`). Ask for the code before any copy names one. The box shows with none, and no code typed into it can work |
 | Back-in-stock alerts | `product` → `stock_waitlist_is_active` | — |
 | Ad tracking | no design switch | an active pixel on the store's tracking design (`tracking/*`) |
-| Countdown timer | `product` → `p_countdown_is_active` (ships **`yes`**). For OFF, also `p_upsell_countdown_is_active`, `sticky_button_countdown_display` (`hide`), `thankyou` → `upsell_countdown_is_active`, and any topbar message with a countdown | shows only on a product whose sale has a start and an end date. Never invent a sale to make it show |
+| Countdown timer | `product` → `p_countdown_is_active` (ships **`yes`**). For OFF, also `p_upsell_countdown_is_active`, `sticky_button_countdown_display` (`hide`), `thankyou` → `upsell_countdown_is_active`, and any topbar message with a countdown | shows only on a product whose sale has a start date and an end date still ahead. Never invent a sale to make it show |
 | Search | `search` → `search_is_active`, plus at least one entry point that is not `none`: `header_search_render`, `inline_search_bar_header_position`, `inline_search_bar_footer_position`, `inline_search_bar_results_page_position`, `floating_button_position` | — |
 
 **The countdown ships switched ON**, so a checklist that says OFF has to switch it off.
@@ -191,8 +191,11 @@ needs, because most of them render nothing without rows.
 product design's default. For a day it also showed product options and upsells ticked ON with no rows
 behind either.*
 
-Record the result in the blueprint (`blueprint-format.md` → "features"). `handover.mjs` reads it back
-and fails when the store disagrees, and **it carries the same map**, so change the two together. If a
+Record the result in the blueprint (`blueprint-format.md` → "features"). A feature meant for only some
+products is a decision too: write which ones and why after "on" (`"on — only the blenders: their
+accessories fit"`), or handover fails the partial reach. `handover.mjs` reads it back and fails when the
+store disagrees or a feature shows no reason to act, and **it carries the same map**, so change the two
+together. If a
 setting in this table is missing from an install, that install has moved on: handover says so, check
 that feature by hand, and correct the table.
 

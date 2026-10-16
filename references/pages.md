@@ -142,10 +142,11 @@ the returned URLs**, so it never has to invent a source.
 - **A product photo is the merchant's real product. Never stock, never a lookalike.** COD is what
   makes this sharper here than on an ordinary store: the customer pays cash *at the door*, so a
   photo of something the box does not contain is not a refund, it is a refusal — the merchant pays
-  both freight legs and the sale is gone. Hero, lifestyle, category tiles and backgrounds carry no
-  such risk and may be sourced. If you can neither generate nor obtain a true photo of the product,
-  **stop and ask the merchant for it**: a build that pauses beats one that ships a stranger's
-  product.
+  both freight legs and the sale is gone. A supplier's photos of the exact product the merchant sells
+  ARE true photos of it: `codbrand-tools` imports them with the product. A generated picture stands in
+  only for a placeholder product you invented. Hero, lifestyle, category tiles and backgrounds carry no
+  such risk and may be sourced. If you cannot obtain a true photo of a real product, **stop and ask
+  the merchant for it**: a build that pauses beats one that ships a stranger's product.
 - **A store must never ship a hotlinked or placeholder photo, whatever the image's source.**
   `placehold.co` boxes and images pointing at someone else's server are a store that breaks when
   that server does — and they read as unfinished to the one visitor who matters. Every image the
@@ -154,14 +155,15 @@ the returned URLs**, so it never has to invent a source.
   Inlining is the more durable choice, since nothing external can withdraw it; a service is
   perfectly reasonable for small glyphs and avoids filling the media library with them.
 
-**Media is upload-only and dedupes by content hash** — re-uploading identical bytes is free and safe,
-but there is no delete, so every iteration on an image stays in the library. Settle on the image
-before you upload it.
+**Media dedupes by content hash** — re-uploading identical bytes is free and safe. A file you uploaded
+can be deleted once nothing uses it, and an image replaced in place at the same format and size
+(`/docs/media_usage_and_delete`), but every place that uses a file has to move before it can go.
+Settle on the image before you upload it.
 
 ### The four image invariants — decide them BEFORE you generate anything
 
-`handover.mjs` fails the build on all four, so deciding them afterwards means regenerating and
-re-uploading into a library with no delete.
+`handover.mjs` fails the build on all four, so deciding them afterwards means regenerating,
+re-uploading and re-pointing every product.
 
 | # | invariant | why |
 |---|---|---|

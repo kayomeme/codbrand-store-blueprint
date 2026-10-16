@@ -1052,7 +1052,8 @@
   const standard = (VW === 1440 && H === 900) || (VW === 390 && H === 844);
   console.log(JSON.stringify(spec, null, 2));
   console.info(`measure.js: ${rows.length} rows on a ${pluginStore ? 'plugin store' : 'reference'} at ${VW}×${H}.`
-    + (standard ? '' : ' The checklist is measured at 1440×900 and 390×844 — resize and run again.')
+    + (standard ? '' : ' The checklist is measured at 1440×900 and 390×844 — resize and run again. If the browser'
+      + ' cannot reach that size, measure the reference and the live store at the same size and say which.')
     + (left.length ? `\nMeasure these by hand and replace them: ${left.join(', ')}` : ''));
   return spec;
 })();

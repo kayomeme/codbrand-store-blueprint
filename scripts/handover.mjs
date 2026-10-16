@@ -23,13 +23,16 @@
  *   2. THE HOLLOW ELEMENT. An element switched ON whose list is EMPTY. The view returns *before* it
  *      prints its own heading, so there is no dangling "Contact us", no error, and no gap in the
  *      markup — just space where a column should be. The footer ships this way deliberately now, so
- *      "leave it alone" produces a hollow footer rather than a defaulted one.
+ *      "leave it alone" produces a hollow footer rather than a defaulted one. Listing cards switched to
+ *      show product options with no option type named show none the same way.
  *
  *   3. THE DANGLING ICON. An `*_icon_id` pointing at an icon that does not exist.
  *      `IconsManagerSelectorFR_cl::getIconCode()` returns `null` for an unknown id — no fallback, no
  *      log, no error. The control simply renders without its icon, and nothing anywhere says so.
  *      Found live on the plugin's own demo store: a cart edit button pointed at icon 17, which does
  *      not exist, while the shipped default was 57 `edit`. It had been that way since the build.
+ *      An EMPTY toggle icon falls back to the store row's own open/close pair, so that pair is
+ *      checked too, and an empty toggle over an empty pair renders no mark at all.
  *
  *   4. THE THIN CATALOGUE. Products with no featured image, a gallery too short to be a gallery, or
  *      photos at mixed aspect ratios / mixed formats. A product page with one photo looks *plausible*
@@ -61,7 +64,9 @@
  *
  *   9. THE UNKEPT CHECKLIST. The feature checklist the merchant corrected is recorded in the
  *      blueprint, and the store can disagree with it: a countdown the merchant was told is OFF shipped
- *      ON, and options ticked ON had no rows behind them. Measured on the same build.
+ *      ON, and options ticked ON had no rows behind them. Measured on the same build. A sales feature
+ *      ON must also show its GOAL — an upsell with a title and a saving, quantity offers with a saving
+ *      — on the products the merchant meant, not on one product of twenty.
  *
  *  10. THE MISSING WHATSAPP BUTTON. Switched on with no number, the floating button renders nothing
  *      at all, and the number ships empty. (Before plugin 1.2.799 it was also invisible with no image;
@@ -91,6 +96,14 @@
  *      without the CSS behind its layout settings (WordPress prints it while it renders the page),
  *      so that fails too. Measured on one store: every placed block had been written by hand, and
  *      each failed the validator with 2 to 7 errors.
+ *
+ *  15. THE STYLE A PRESET OVERRULES. A `*_style` property that the preset on the same element also
+ *      sets usually loses to the preset: stored, compiled, never seen. A WARNING (see
+ *      checkStyleVsPreset()).
+ *
+ *  16. THE DESIGN THE STORE DOES NOT SHOW. A design is linked to nothing until its store row points at
+ *      it; a pointer at 0 shows the first active design of its type, and one at a missing design falls
+ *      back the same way (see checkPointers()).
  *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
@@ -278,8 +291,10 @@ async function countRows(call, path) {
  *   `<surface>_layout_config` → { default: {type:'sm', id}, pages: { <context>: {type:'sm', id} } }
  *   `<type>_sm_id`            → an integer id                     (everything else)
  * A layout surface can use a DIFFERENT design on some pages (the `pages` overrides), and a shopper
- * sees each of those, so each is checked. Returned as [type, id] pairs, without repeats.
- * Reading it this way means a surface the plugin adds later is checked without editing this file.
+ * sees each of those, so each is checked. A pointer at 0 that the store row's `renders` reports as
+ * falling back is checked through the design the storefront actually shows. Returned as [type, id]
+ * pairs, without repeats. Reading it this way means a surface the plugin adds later is checked
+ * without editing this file.
  */
 function designsFrom(store) {
   const out = [];
@@ -299,9 +314,42 @@ function designsFrom(store) {
       }
     } else if (key.endsWith('_sm_id') && Number(value) > 0) {
       add(key.slice(0, -'_sm_id'.length), Number(value));
+    } else if (key.endsWith('_sm_id') && store?.renders?.[key]?.via === 'fallback' && Number(store.renders[key].id) > 0) {
+      add(key.slice(0, -'_sm_id'.length), Number(store.renders[key].id));
     }
   }
   return out;
+}
+
+/**
+ * 16 — THE DESIGN THE STORE DOES NOT SHOW. Each component renders through the design its store row
+ * points at. A design created through the api is linked to nothing, and a pointer at 0 shows the first
+ * active design of its type, so a design the build styled can sit unused while the storefront shows
+ * another, with a 200 on every call. A pointer at a design that does not exist falls back the same
+ * way. The store row's own `renders` says what each pointer shows; this reads it and never guesses.
+ */
+async function checkPointers(call, R, store) {
+  const problems = [];
+  const notes = [];
+  const renders = store?.renders;
+  if (!renders || typeof renders !== 'object') return { problems, notes, unknown: true };
+  const instancesPath = pathFor('section_manager_instances', 'section_manager/instances', R);
+  for (const [key, r] of Object.entries(renders)) {
+    if (!key.endsWith('_sm_id') || !r || typeof r !== 'object') continue;
+    if (r.exists === false) {
+      problems.push(`\`${key}\` points at design #${r.id}, which the storefront cannot use: ${r.warning ?? 'no such design'}\n` +
+        '      Point it at the design you styled.');
+      continue;
+    }
+    if (r.via !== 'fallback') continue;
+    const type = r.type ?? key.slice(0, -'_sm_id'.length);
+    const count = await countRows(call, `${instancesPath}?type=${encodeURIComponent(type)}`);
+    if (count.error || count.count < 2) continue;
+    notes.push(`\`${key}\` is 0, so the storefront shows the first active ${type} design, #${r.id} "${clip(r.title ?? '', 40)}"; ` +
+      `this install has ${count.count} ${type} designs. If you styled another one, point the store at it (\`stores\` → \`${key}\`): ` +
+      'a design shows only once its store points at it.');
+  }
+  return { problems, notes, unknown: false };
 }
 
 /** The whole hollow rule, in one function. See the header comment for why it is a shape, not a list. */
@@ -391,8 +439,15 @@ function readImageSize(buf) {
  * read ONCE, every page of them, and matched as a set; ids are compared as strings because the
  * settings store them as strings and the API returns them as strings, and `'17' !== 17` would
  * silently pass everything.
+ *
+ * A design's open/close toggle icon left EMPTY ("" or "0") is not missing: the view falls back to
+ * the store row's own pair, `collapse_open_icon_id` / `collapse_close_icon_id`. So the store's pair is
+ * checked like a design's, and an empty toggle fails only when the pair it falls back to is empty
+ * too — then the collapsible renders with no open/close mark at all. Measured: a store's pair seeded
+ * 0 / 0 left every cart, checkout and thank-you collapsible without one, and the empty design ids
+ * were skipped as "not set".
  */
-async function checkIcons(call, R, settingsByDesign) {
+async function checkIcons(call, R, settingsByDesign, store) {
   const iconPath = pathFor('design_controls_icons_manager', 'design_controls/icons_manager', R);
   const read = await walk(call, iconPath);
   if (read.error) {
@@ -401,7 +456,19 @@ async function checkIcons(call, R, settingsByDesign) {
   const known = new Map(read.rows.map((r) => [String(r.id), r.name]));
 
   const dangling = [];
+  const unmarked = [];
   const byDesign = new Map();
+  const storePair = ['collapse_open_icon_id', 'collapse_close_icon_id'].filter((k) => k in (store ?? {}));
+  const fallbackOk = { open: false, close: false };
+  for (const k of storePair) {
+    const id = String(store[k] ?? '').trim();
+    const side = k.includes('open') ? 'open' : 'close';
+    if (!id || id === '0') continue;
+    if (!known.has(id)) { dangling.push({ design: 'stores', key: k, id }); continue; }
+    fallbackOk[side] = true;
+    if (!byDesign.has('stores')) byDesign.set('stores', new Map());
+    byDesign.get('stores').set(k, { id, name: known.get(id) });
+  }
   for (const [design, settings] of settingsByDesign) {
     for (const [k, v] of Object.entries(settings)) {
       /* Any key that holds an icon id — NOT just one ending `_icon_id`. The toggle keys are spelled
@@ -412,7 +479,11 @@ async function checkIcons(call, R, settingsByDesign) {
        * the browser disagreed with a green gate, which is the only reason it was found. */
       if (!/icon/.test(k) || !k.endsWith('_id')) continue;
       const id = String(v ?? '').trim();
-      if (!id || id === '0') continue;
+      if (!id || id === '0') {
+        const toggle = k.match(/_icon_(open|close)_id$/);
+        if (toggle && storePair.length && !fallbackOk[toggle[1]]) unmarked.push({ design, key: k, side: toggle[1] });
+        continue;
+      }
       if (!known.has(id)) { dangling.push({ design, key: k, id }); continue; }
       if (!byDesign.has(design)) byDesign.set(design, new Map());
       byDesign.get(design).set(k, { id, name: known.get(id) });
@@ -443,7 +514,7 @@ async function checkIcons(call, R, settingsByDesign) {
       mismatched.push({ design, key, closeKey, open, close });
     }
   }
-  return { skipped: null, dangling, mismatched, count: known.size, pairs: PAIRS };
+  return { skipped: null, dangling, mismatched, unmarked, count: known.size, pairs: PAIRS };
 }
 
 /**
@@ -693,6 +764,55 @@ function presetAt(preset) {
   const desktop = cascade(new Map(), preset.css_default, force);
   const phone = cascade(new Map(desktop), preset.css_mobile, force);
   return { desktop, phone };
+}
+
+/**
+ * 15 — THE STYLE A PRESET OVERRULES. A `*_style` and a `*_preset` can paint the same element — "same
+ * element" meaning they share a `css_selector` in the design's `style_generator`, the plugin's own
+ * test. When both set a property, the preset usually wins on the storefront, so the style's value is
+ * stored, compiled and never seen: a 200 and no visible change. Measured on one build: a topbar given
+ * its colour through the style stayed invisible until the colour went into a preset.
+ *
+ * A WARNING, never a failure — "usually": a selector holding an id outranks the preset (skipped, as the
+ * plugin skips it), an !important style beats a normal preset, and an equally specific preset can
+ * lose. Only properties set to DIFFERENT values are reported; padding and background are compared as
+ * longhands, every other property as written. A preset on a parent or child element is not checked.
+ */
+function checkStyleVsPreset(designs, presetsById) {
+  const notes = [];
+  const norm = (v) => String(v).replace(/\s+/g, ' ').trim().toLowerCase();
+  for (const d of designs) {
+    const sg = d.styleGen ?? {};
+    for (const [key, css] of Object.entries(d.settings)) {
+      if (!key.endsWith('_style') || typeof css !== 'string' || !css.trim()) continue;
+      const sel = sg[key]?.css_selector;
+      if (!sel || sel.includes('#')) continue;
+      const style = cascade(new Map(), css);
+      for (const [pKey, pId] of Object.entries(d.settings)) {
+        /* `*_countdown_preset` holds a countdown DESIGN id, not a preset (/docs/settings_vs_presets). */
+        if (!pKey.endsWith('_preset') || pKey.endsWith('_countdown_preset')) continue;
+        if (sg[pKey]?.css_selector !== sel) continue;
+        const preset = presetAt(presetsById.get(String(pId)));
+        if (!preset) continue;
+        const clash = [];
+        for (const [prop, mine] of style) {
+          for (const map of [preset.desktop, preset.phone]) {
+            const theirs = map.get(prop);
+            if (!theirs || norm(theirs.value) === norm(mine.value)) continue;
+            if (mine.important && !theirs.important) continue;
+            clash.push(`${prop} ${mine.value} (the preset: ${theirs.value}${map === preset.phone ? ', on phones' : ''})`);
+            break;
+          }
+        }
+        if (clash.length) {
+          notes.push(`${d.label}.${key} sets ${clash.join('; ')}, but preset ${pId} (\`${pKey}\`) paints the same element\n` +
+            '    and usually wins, so these values may never show. Put the look in the preset (clone it first when other\n' +
+            '    surfaces use it), not in the style — /docs/settings_vs_presets.');
+        }
+      }
+    }
+  }
+  return notes;
 }
 
 /** A length that is zero — or absent, which on a card design means the same: nothing pads it. */
@@ -1357,6 +1477,11 @@ const SEARCH_ENTRIES = ['header_search_render', 'inline_search_bar_header_positi
  * `rows` is what an ON feature needs behind it. Where the block renders NOTHING without rows
  * (`gates`, verified in each view), a switch left on over zero rows is not showing anything — so an
  * OFF decision is noted there, not failed. The coupon box is the exception: it renders with no codes.
+ *
+ * `goal` is what makes an ON feature WORK, beyond showing: the reason a shopper acts on it. A sales
+ * feature switched on with rows behind it can still give no reason at all — an upsell strip with no
+ * title and no saving, quantity offers on one product of twenty — and every count above passes it.
+ * Measured on one build. The table's twin column is "What makes it work".
  */
 const FEATURES = {
   reviews: {
@@ -1368,6 +1493,7 @@ const FEATURES = {
     label: 'Quantity discounts',
     state: (c) => combine([probe(c, 'product', 'qty_offers_is_active')]),
     rows: { slug: 'qty_offers', path: 'qty_offers', query: 'is_active=yes', what: 'active quantity offers', gates: true },
+    goal: goalOffers,
   },
   product_variations: {
     label: 'Product options',
@@ -1377,9 +1503,10 @@ const FEATURES = {
     rows: { products: (p) => Array.isArray(p.variations) && p.variations.length > 0, what: 'products carrying options', gates: true },
   },
   product_upsells: {
-    label: 'You may also like',
+    label: 'Upsell offer',
     state: (c) => combine([probe(c, 'product', 'p_upsell_is_active')]),
     rows: { upsells: true, what: 'products carrying upsells', gates: true },
+    goal: goalUpsells,
   },
   quickview: {
     label: 'Quick view',
@@ -1398,7 +1525,9 @@ const FEATURES = {
     label: 'Discount codes',
     state: (c) => combine([probe(c, 'cart', 'cart_coupon_is_active')]),
     rows: { slug: 'coupons', path: 'coupons', query: 'is_active=yes', what: 'active discount codes',
-            empty: 'so the code box shows on the cart and checkout, and no code typed into it can work' },
+            empty: 'so the code box shows on the cart and checkout, and no code typed into it can work. The api only READS ' +
+                   'codes (/docs/coupons): a person creates them in wp-admin. Ask the merchant for the code, and name none ' +
+                   'in any copy until it exists' },
   },
   stock_waitlist: {
     label: 'Back-in-stock alerts',
@@ -1430,6 +1559,31 @@ const FEATURES = {
             scoped: true, empty: 'so nothing is tracked' },
   },
 };
+
+/**
+ * Options on a listing CARD — the swatches under a product — are a second switch, per option type: the
+ * listing design's `variations_is_active` shows only the global options named in
+ * `variations_included_slugs`, and an empty list shows none. Part of the curated map above; its twin
+ * is archetypes.md → "What switches each feature", Product options. Checked on every listing design
+ * the store uses, whatever the checklist says: a switch on over an empty list is a hollow element.
+ */
+function checkCardOptions(designs) {
+  const problems = [];
+  for (const d of designs) {
+    const s = d.settings;
+    if (d.type !== 'plist1' || !('variations_is_active' in s) || !('variations_included_slugs' in s)) continue;
+    if (!yes(s.variations_is_active)) continue;
+    const raw = s.variations_included_slugs;
+    const listed = (asArray(raw) ?? String(raw ?? '').split(',')).map((x) => String(x).trim()).filter(Boolean);
+    if (listed.length) continue;
+    problems.push(
+      `${d.label}: \`variations_is_active\` is "yes" but \`variations_included_slugs\` names no option type, so no\n` +
+      '      product card shows any. List the option types the cards should show (/docs/plist1_global_settings),\n' +
+      '      or set the switch to "no".'
+    );
+  }
+  return problems;
+}
 
 /** "on", "off", or null — accepts a trailing note ("on — 10/10 products carry sizes") and booleans. */
 function decisionOf(v) {
@@ -1534,7 +1688,7 @@ async function reconcileFeatures(call, R, ctx, recorded, productsRead) {
 
     let rows = null;
     if (feature.rows && (decision === 'on' || !feature.state || (feature.rows.gates && state.shows))) {
-      rows = await rowsFor(call, R, ctx, feature.rows, productsRead);
+      rows = await rowsFor(call, R, ctx, feature.rows, productsRead, decision === 'on' && !!feature.goal);
       if (rows.error) {
         problems.push(`feature \`${rawKey}\` (${feature.label}) was NOT reconciled — could not count its ${feature.rows.what}: ${rows.error}. A check that did not run is not a pass: re-run.`);
         continue;
@@ -1568,7 +1722,11 @@ async function reconcileFeatures(call, R, ctx, recorded, productsRead) {
         '      or, if no door can, tell the merchant and record it OFF until they do.'
       );
     } else if (name === 'countdown' && decision === 'on' && !productsRead.error && !productsRead.rows.some(onTimedSale)) {
-      notes.push('feature `countdown` is ON, but no product has a sale with a start AND an end date, so the timer shows nowhere yet. Tell the merchant it appears when they run a timed sale — do not invent one.');
+      notes.push('feature `countdown` is ON, but no product has a sale with a start date and an end date still ahead, so the timer shows nowhere now. Tell the merchant it appears when they run a timed sale — do not invent one.');
+    } else if (decision === 'on' && feature.goal && (!state || state.main) && rows && rows.count > 0) {
+      const goal = await feature.goal(ctx, productsRead, rows, decisionNote(rawValue), call, R);
+      problems.push(...goal.problems.map((p) => `feature \`${rawKey}\` (${feature.label}) — ${p}`));
+      notes.push(...goal.notes);
     }
   }
   if (unknown.length) {
@@ -1577,33 +1735,136 @@ async function reconcileFeatures(call, R, ctx, recorded, productsRead) {
   return { reconciled, problems, notes };
 }
 
-/** A product the countdown can render on: a sale price, with both a start and an end date. */
+/** A product the countdown can render on: a sale price, with a start date and an end date still ahead. */
 function onTimedSale(p) {
-  return Number(p.sale_price) > 0 && String(p.sale_from ?? '').trim() !== '' && String(p.sale_to ?? '').trim() !== '';
+  if (!(Number(p.sale_price) > 0) || String(p.sale_from ?? '').trim() === '') return false;
+  const to = String(p.sale_to ?? '').trim();
+  if (!to) return false;
+  const end = Date.parse(to.replace(' ', 'T'));
+  return Number.isNaN(end) || end > Date.now();
 }
 
-/** What an ON feature needs behind it, counted. */
-async function rowsFor(call, R, ctx, spec, productsRead) {
+/** What an ON feature needs behind it, counted. `full` reads every row an ON feature's goal probe needs. */
+async function rowsFor(call, R, ctx, spec, productsRead, full = false) {
   if (spec.products) {
     if (productsRead.error) return { error: `products could not be read — ${productsRead.error}` };
     return { count: productsRead.rows.filter(spec.products).length };
   }
   if (spec.upsells) {
     if (productsRead.error) return { error: `products could not be read — ${productsRead.error}` };
-    /* Upsells are read through the product that offers them, one product at a time. Stop at the
-     * first product carrying any: the question is whether the feature has anything to show. */
+    /* Upsells are read through the product that offers them, one product at a time. Without `full`,
+     * stop at the first product carrying any: the question is only whether the feature has anything
+     * to show. With it, read every published product's: the goal probe counts how many carry them
+     * and reads what they offer. */
     const path = pathFor('product_upsells', 'product/upsells', R);
-    for (const p of productsRead.rows) {
-      const res = await call(`${path}?product_id=${encodeURIComponent(p.id)}&per_page=1`);
+    const published = productsRead.rows.filter((p) => String(p.status ?? 'publish') === 'publish');
+    const upsold = new Map();
+    for (const p of full ? published : productsRead.rows) {
+      const res = await call(`${path}?product_id=${encodeURIComponent(p.id)}&per_page=${full ? PAGE_SIZE : 1}`);
       if (res.status !== 200) return { error: `product/upsells for product ${p.id} answered HTTP ${res.status}` };
-      if ((listRows(res.body) ?? []).length) return { count: 1 };
+      const found = listRows(res.body) ?? [];
+      if (found.length && !full) return { count: 1 };
+      if (found.length) upsold.set(String(p.id), found);
     }
-    return { count: 0 };
+    return full ? { count: upsold.size, total: published.length, upsold } : { count: 0 };
   }
   let query = spec.query;
   const instance = Number(ctx.store?.tracking_sm_id ?? 0);
   if (spec.scoped && instance > 0) query += `&tracking_instance_id=${instance}`;
+  if (full && spec.slug === 'qty_offers') {
+    const read = await walk(call, `${pathFor(spec.slug, spec.path, R)}?${query}`);
+    return read.error ? { error: read.error } : { count: read.rows.length, rows: read.rows };
+  }
   return countRows(call, `${pathFor(spec.slug, spec.path, R)}?${query}`);
+}
+
+/** The words after "on" in a decision ("on — only the six blenders: …"), the reason a partial reach was chosen. */
+function decisionNote(v) {
+  return typeof v === 'string' ? v.trim().replace(/^on\b[\s—–:,;-]*/i, '').trim() : '';
+}
+
+/** Products a share of the catalogue reaches — fine when the blueprint says which and why, otherwise a failure. */
+function partialReach(feature, reached, total, reason) {
+  if (!total || reached >= total) return null;
+  if (reason.length >= MIN_REASON) return null;
+  return `${feature} reaches ${reached} of ${total} published products.\n` +
+    '      A feature the merchant ticked works only where it reaches. Extend it to the rest, or record which products\n' +
+    `      and why in the blueprint's decision ("on — <which, and why: at least ${MIN_REASON} characters>").`;
+}
+
+/**
+ * The upsell's goal: a reason to add the product. A title the shopper reads, a saving they can see,
+ * card text where the cards show text, on the products the merchant meant. Measured on one build: a
+ * strip with no title (`always_visible` drops it), no saving and empty card text on 20 of 20
+ * products, while "products carry upsells" passed.
+ */
+async function goalUpsells(ctx, productsRead, rows, reason) {
+  const problems = [];
+  const byId = new Map(productsRead.rows.map((p) => [String(p.id), p]));
+  const upsold = [...new Set([...rows.upsold.values()].flat().map((u) => String(u.id)))].map((id) => byId.get(id)).filter(Boolean);
+  const onSale = (p) => String(p.on_sale ?? '') === 'yes' || yes(p.on_sale) ||
+    (Number(p.sale_price) > 0 && Number(p.sale_price) < Number(p.regular_price));
+  for (const d of ctx.designsOf('product')) {
+    const s = d.settings;
+    if (!yes(s.p_upsell_is_active)) continue;
+    const title = String(s.p_upsell_header_title ?? '').trim();
+    if (String(s.p_upsell_display_type) === 'always_visible') {
+      problems.push(`${d.label}: the upsell shows NO title — display type "always_visible" drops the header and its\n` +
+        `      \`p_upsell_header_title\` (${JSON.stringify(clip(title, 40))}). Use a collapsible display type, so the shopper\n` +
+        '      reads why these products are offered.');
+    } else if (!title) {
+      problems.push(`${d.label}: \`p_upsell_header_title\` is empty, so the upsell strip has no title.`);
+    }
+    const discount = Number(s.p_upsell_discount_percentage ?? 0);
+    const pricesShown = yes(s.p_upsell_regular_price_is_active) || yes(s.p_upsell_sale_price_is_active);
+    if (!(discount > 0) && !upsold.some(onSale)) {
+      problems.push(`${d.label}: the upsell offers NO saving — \`p_upsell_discount_percentage\` is 0 and no upsold product\n` +
+        '      is on sale — so it shows products at full price with no reason to add them. An offer is a promise: set the\n' +
+        '      saving the merchant agreed to, and ask them when they have not said. Never invent one.');
+    } else if (!pricesShown) {
+      problems.push(`${d.label}: the upsell has a saving, but both of its price displays are off, so nobody sees it.`);
+    }
+    if (yes(s.p_upsell_card_description_is_active) && upsold.length &&
+        upsold.every((p) => !String(p.upsell_description ?? '').replace(/<[^>]*>/g, '').trim())) {
+      problems.push(`${d.label}: upsell cards show a description, but none of the ${upsold.length} upsold product(s) has an\n` +
+        '      `upsell_description`, so every card\'s text line is empty. Write them on those products, or switch the\n' +
+        '      description off.');
+    }
+  }
+  const reach = partialReach('the upsell', rows.count, rows.total, reason);
+  if (reach) problems.push(reach);
+  return { problems, notes: [] };
+}
+
+/**
+ * Quantity offers' goal: a saving for buying more, on the products the merchant meant. An offer
+ * counts only with at least two tiers and a saving on a tier above one unit — the seeded catalogue-wide
+ * offer ships switched off, and an offer of one tier, or of tiers with nothing off, gives no reason
+ * to buy two. Measured on one build: one offer, on 1 product of 20, passed.
+ */
+async function goalOffers(ctx, productsRead, rows, reason, call, R) {
+  const problems = [];
+  const saves = (t) => Number(t?.quantity) > 1 && (Number(t?.discount_per_product) > 0 || Number(t?.offered_quantity) > 0);
+  const real = rows.rows.filter((o) => Array.isArray(o.tiers) && o.tiers.length >= 2 && o.tiers.some(saves));
+  if (!real.length) {
+    problems.push(`${rows.rows.length} active quantity offer(s), and none has two tiers with a saving above one unit, so the\n` +
+      '      offer box gives no reason to buy more. Set the tiers the merchant agreed to (/docs/qty_offer_writes).');
+    return { problems, notes: [] };
+  }
+  const published = productsRead.rows.filter((p) => String(p.status ?? 'publish') === 'publish');
+  let reached = 0;
+  if (real.some((o) => o.application_scope === 'all_products')) {
+    reached = published.length;
+  } else {
+    const cats = await walk(call, pathFor('categories', 'categories', R));
+    const slugOf = new Map((cats.rows ?? []).map((c) => [String(c.id), String(c.slug)]));
+    const inCats = new Set(real.filter((o) => o.application_scope === 'category').map((o) => slugOf.get(String(o.application_target))).filter(Boolean));
+    const single = new Set(real.filter((o) => o.application_scope === 'single_product').map((o) => String(o.application_target)));
+    reached = published.filter((p) => single.has(String(p.id)) || (asArray(p.category_slugs) ?? []).some((s) => inCats.has(String(s)))).length;
+  }
+  const reach = partialReach('quantity offers', reached, published.length, reason);
+  if (reach) problems.push(reach);
+  return { problems, notes: [] };
 }
 
 /* ── 13. custom blocks: content, checked like a page ───────────────────────────────────────────── */
@@ -1777,7 +2038,8 @@ async function main(base) {
     const settings = res.body?.settings ?? res.body?.data?.settings;
     if (!settings || typeof settings !== 'object') { unreadable.push(`${type}/${id} (no settings)`); continue; }
     const schema = res.body?.settings_schema ?? res.body?.data?.settings_schema ?? {};
-    designs.push({ label: `${type}/${id}`, type, id, settings, schema });
+    const styleGen = res.body?.style_generator ?? res.body?.data?.style_generator ?? {};
+    designs.push({ label: `${type}/${id}`, type, id, settings, schema, styleGen });
 
     for (const h of hollowIn(settings)) {
       hollow++;
@@ -1788,8 +2050,21 @@ async function main(base) {
       );
     }
   }
-  if (!hollow && designs.length) passed.push('nothing switched on and empty');
+  const cardOptions = checkCardOptions(designs);
+  problems.push(...cardOptions);
+  if (!hollow && !cardOptions.length && designs.length) passed.push('nothing switched on and empty');
   const settingsByDesign = new Map(designs.map((d) => [d.label, d.settings]));
+
+  /* ── the design each pointer actually shows ──────────────────────────────────────────────────── */
+  const pointers = await checkPointers(call, R, store);
+  problems.push(...pointers.problems);
+  notes.push(...pointers.notes);
+  if (pointers.unknown) {
+    notes.push('this plugin\'s store row carries no `renders`, so which design each pointer shows was NOT checked.');
+  } else if (!pointers.problems.length) {
+    line(true, 'every design pointer on the store row shows a design that exists');
+    passed.push('every pointer shows a real design');
+  }
 
   /* ── the WhatsApp button, which renders nothing without a number ─────────────────────────────── */
   const whatsapp = checkWhatsappButton(designs);
@@ -1803,7 +2078,19 @@ async function main(base) {
   }
 
   /* ── dangling icon ids: invisible at runtime, so this is the only place they can be caught ──── */
-  const icons = await checkIcons(call, R, settingsByDesign);
+  const icons = await checkIcons(call, R, settingsByDesign, store);
+  if (!icons.skipped && icons.unmarked.length) {
+    const shown = icons.unmarked.slice(0, 8);
+    problems.push(
+      `${icons.unmarked.length} collapsible toggle icon(s) are empty, and the store's own pair they fall back to is empty too:\n` +
+      shown.map((u) => `        ${u.design}.${u.key}`).join('\n') +
+      (icons.unmarked.length > shown.length ? `\n        … and ${icons.unmarked.length - shown.length} more` : '') + '\n' +
+      `      stores.collapse_open_icon_id = ${JSON.stringify(store?.collapse_open_icon_id)}, collapse_close_icon_id = ` +
+      `${JSON.stringify(store?.collapse_close_icon_id)}\n` +
+      '      Those collapsibles render with no open/close mark. Point the store\'s pair at an open/close icon pair,\n' +
+      '      looked up BY NAME through design_controls/icons_manager — never a remembered id.'
+    );
+  }
   if (icons.skipped) {
     line(false, `${icons.skipped} — icon ids NOT checked, and not passed`);
     // Counted, not just printed: without this the run still ended "✓ … icons resolve" and exit 0
@@ -1828,7 +2115,7 @@ async function main(base) {
         '      Resolve icons BY NAME through design_controls/icons_manager.'
       );
     }
-  } else {
+  } else if (!icons.unmarked.length) {
     line(true, `every icon id resolves and every open/close pair belongs together (${icons.count} icons)`);
     passed.push('icons resolve');
   }
@@ -1952,6 +2239,7 @@ async function main(base) {
     problems.push(`the header and band checks were NOT run: the card designs could not be read — ${presetsRead.error}. A check that did not run is not a pass: re-run.`);
   } else {
     const presetsById = new Map(presetsRead.rows.map((p) => [String(p.id), p]));
+    notes.push(...checkStyleVsPreset(designs, presetsById));
     const paletteRead = await walk(call, pathFor('design_controls_color_palette', 'design_controls/color_palette', R));
     const resolve = colourResolver(paletteRead.error ? null : paletteRead.rows);
     const headers = designs.filter((d) => d.type === 'header');

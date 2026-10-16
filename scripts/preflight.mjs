@@ -68,11 +68,11 @@ const market = flag('market');
  * A missing companion is a setup problem with a one-line fix, so it is worth saying out loud before
  * any work starts rather than discovering it after the palette and designs are already written.
  */
-function findCompanionSkill() {
+function findCompanionSkill(name = 'codbrand-content-builder') {
   const home = process.env.HOME || process.env.USERPROFILE || '';
   const candidates = [
-    join(home, '.claude', 'skills', 'codbrand-content-builder', 'SKILL.md'),
-    join(process.cwd(), '.claude', 'skills', 'codbrand-content-builder', 'SKILL.md'),
+    join(home, '.claude', 'skills', name, 'SKILL.md'),
+    join(process.cwd(), '.claude', 'skills', name, 'SKILL.md'),
   ];
   return candidates.find((p) => existsSync(p)) || null;
 }
@@ -99,8 +99,11 @@ const NEEDED = {
   'stores':                          ['stores',                         'read which designs each surface uses, and the site logo'],
   'store_settings':                  ['store_settings',                 'reading direction, site title, page width'],
   'section_manager_global_settings': ['section_manager/global_settings','write the designs'],
+  'section_manager_instances':       ['section_manager/instances',      'create a design of your own when the one in use is shared'],
   'design_controls_color_palette':   ['design_controls/color_palette',  'the colour tokens'],
   'design_controls_font_manager':    ['design_controls/font_manager',   'the fonts'],
+  'design_controls_presets':         ['design_controls/presets',        'the presets that paint colour, type and shape on every surface'],
+  'design_controls_icons_manager':   ['design_controls/icons_manager',  'the icons, looked up by name'],
   'pages':                           ['pages',                          'create the content pages'],
   'media':                           ['media',                          'upload the logo and the images'],
   'products':                        ['products',                       'read and write the products'],
@@ -398,6 +401,14 @@ async function main(base) {
   line(!!companion, companion
     ? 'codbrand-content-builder installed — it renders the pages'
     : 'codbrand-content-builder NOT installed — required to build any page');
+  /* Not required: only a merchant who sells a supplier's or another store's products needs it. But
+   * without it phase 5b invents a catalogue they already have, with pictures of products they do not. */
+  if (findCompanionSkill('codbrand-tools')) {
+    line(true, 'codbrand-tools installed — it imports a supplier\'s or another store\'s products');
+  } else {
+    console.log('  ! codbrand-tools NOT installed — needed only if the merchant sells products from a supplier or');
+    console.log('    another store: phase 5b imports those with it. Install it beside this skill before then.');
+  }
 
   if (forbidden.length || missing.length || httpsRefused.length) {
     // NAME THE RIGHT CULPRIT. This said "This key cannot complete a build" for every failure kind,
