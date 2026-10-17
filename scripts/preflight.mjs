@@ -285,7 +285,7 @@ async function main(base) {
     return 1;
   }
   if (me.status === 404) {
-    console.error('  ✗ no COD Leads API at this URL.');
+    console.error('  ✗ no CodBrand API at this URL.');
     console.error('    This skill only works on a WordPress site running that plugin —');
     console.error('    not on Shopify, plain WooCommerce, or plain WordPress.\n');
     return 1;
@@ -473,7 +473,7 @@ async function main(base) {
       console.error('\nThe key is missing a scope for:\n');
       for (const m of forbidden) console.error(`    • ${m}`);
       console.error('\nAsk the merchant to tick these in their API settings and save the key.');
-      console.error('A scope CAN be added to an existing key: open it in COD Leads -> API, tick the');
+      console.error('A scope CAN be added to an existing key: open it in CodBrand -> API, tick the');
       console.error('missing permission and save. Re-issuing the key is not required.');
     }
 

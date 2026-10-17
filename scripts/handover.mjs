@@ -1412,7 +1412,7 @@ async function checkPublicHome(siteUrl) {
     return {
       status: res.status,
       title,
-      store: /\/plugins\/cod-leads-for-elementor\/|cl_ajax_nonce/.test(html),
+      store: /\/plugins\/(codbrand-plugin|cod-leads-for-elementor)\/|cl_ajax_nonce/.test(html),
     };
   } catch (err) {
     return { error: err.message };
@@ -2353,7 +2353,7 @@ async function main(base) {
   if (searchHidden === 'yes') {
     notes.push('THE WHOLE SITE IS HIDDEN FROM SEARCH ENGINES (`discourage_search_engines`: yes). Tell the merchant in plain\n' +
       '    words: "your site is hidden from Google and other search engines; nothing looks broken, but a launched\n' +
-      '    store gets no search traffic while this is on. Turn it off at launch: COD Settings > Store > Store\n' +
+      '    store gets no search traffic while this is on. Turn it off at launch: CodBrand > Store > Store\n' +
       '    Visibility." Offer to switch it off only when they say they are launching and your key holds\n' +
       '    `search_visibility`; never change it on your own. A demo or development site stays hidden on purpose.');
   } else if (searchHidden === 'no') {

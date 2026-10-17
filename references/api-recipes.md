@@ -144,7 +144,7 @@ compare the keys yourself.
 translatable settings were still English, including "Add to cart" on the main buy button.*
 
 ⚠️ **The `langue_code` translation pack is WordPress's, not ours.** Setting `ar` installs the
-Arabic pack, which translates core and the theme. This plugin ships `codlfw.pot` at **0 bytes**
+Arabic pack, which translates core and the theme. This plugin ships no `.pot`
 and no `.mo` or `.po` in any language, so no pack ever reaches the 57 above. If that changes and
 translation files start shipping, this whole section shrinks to nothing — re-measure rather than
 trusting the counts.

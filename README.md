@@ -1,11 +1,11 @@
 # codbrand-store-blueprint — references & scripts
 
 Everything the `codbrand-store-blueprint` skill uses, except its entry point. The skill plans and
-builds a complete cash-on-delivery storefront on a WordPress site running the COD Leads plugin.
+builds a complete cash-on-delivery storefront on a WordPress site running the CodBrand plugin.
 
 ## This is most of a skill, but not its entry point
 
-`SKILL.md` — the skill's instructions — **ships inside the COD Leads plugin** and is installed from
+`SKILL.md` — the skill's instructions — **ships inside the CodBrand plugin** and is installed from
 there. Everything `SKILL.md` refers to lives here:
 
 | in this repository | ships with the plugin |
