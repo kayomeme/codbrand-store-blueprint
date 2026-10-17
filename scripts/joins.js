@@ -19,8 +19,9 @@
  *                       least one draws a border (or casts a shadow) on that side or their backgrounds
  *                       differ. Measured: an order summary switched on sat flush on the form box below
  *                       it, its closed state drawing its bottom border along the box's top edge. Not a
- *                       seam: a lower box's own divider with clear space on both sides of it, and the
- *                       edge of a transparent section that keeps its content 24px away.
+ *                       seam: a lower box's own divider with clear space on both sides of it, and a box
+ *                       that paints nothing on the seam and keeps its visible content away from it — 8px
+ *                       below a box, 24px above one.
  *   stacked-dividers    two horizontal rules (a top/bottom border with no side borders, or an <hr>)
  *                       within 24px of each other, from two different boxes — or a rule within 12px of
  *                       a bordered box's edge. Two bordered cards 16px apart are a list, not this. Measured:
@@ -125,9 +126,18 @@
     return { el, r: box(el), top: edge(cs, 'Top') || shadow, bottom: edge(cs, 'Bottom') || shadow,
       sides: !!(edge(cs, 'Left') && edge(cs, 'Right')) || !!shadow, bg: paints(cs) ? parseColour(cs.backgroundColor) : null };
   });
-  // How far from an element's top or bottom edge the first thing drawn inside it sits: text, a replaced
-  // element or control, a descendant's top or bottom border and, with `withPaint`, a descendant's
-  // background. Infinity when it draws nothing.
+  // A background the eye can see: an image, or a colour unlike what is behind the element.
+  const visiblePaint = (el, cs) => {
+    if (cs.backgroundImage !== 'none') return true;
+    const c = parseColour(cs.backgroundColor);
+    return !!(c && c.a > 0.05) && !sameColour(c, behind(el));
+  };
+  // A control that shows as a box: a border, a shadow, or a visible background. One that does not (a white
+  // button on a white page) is drawn only by what it holds — its icon, its text.
+  const controlShows = (el, cs) => ['Top', 'Right', 'Bottom', 'Left'].some((s) => edge(cs, s)) || !!shadowEdge(cs) || visiblePaint(el, cs);
+  // How far from an element's top or bottom edge the first thing VISIBLY drawn inside it sits: text, a
+  // replaced element, a control that shows as a box, a descendant's top or bottom border and, with
+  // `withPaint`, a descendant's visible background. Infinity when it draws nothing.
   const gapTo = (el, side, withPaint) => {
     const r = box(el);
     let best = Infinity;
@@ -142,8 +152,9 @@
       } else {
         if (!isShown(n)) continue;
         const cs = getComputedStyle(n);
-        if (/^(IMG|SVG|VIDEO|CANVAS|INPUT|SELECT|TEXTAREA|BUTTON|IFRAME|HR)$/i.test(n.tagName) || edge(cs, 'Top') || edge(cs, 'Bottom')
-          || (withPaint && paints(cs))) rr = n.getBoundingClientRect();
+        if (/^(IMG|SVG|VIDEO|CANVAS|IFRAME|HR)$/i.test(n.tagName) || edge(cs, 'Top') || edge(cs, 'Bottom')
+          || (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/i.test(n.tagName) && controlShows(n, cs))
+          || (withPaint && visiblePaint(n, cs))) rr = n.getBoundingClientRect();
       }
       if (!rr || !rr.width || !rr.height) continue;
       best = Math.min(best, side === 'top' ? rr.top - r.top : r.bottom - rr.bottom);
@@ -208,12 +219,15 @@
       // Two designed joins are not seams, measured on a store's every page: (1) THE LOWER BOX'S OWN
       // DIVIDER — the only line on the seam is the top border of a box with no side borders (a rule
       // across a band, like a footer's bottom bar), the box above is no card, and the content keeps 8px
-      // clear on both sides of the line; (2) A TRANSPARENT SECTION'S EDGE — the side that brings no line
-      // paints nothing there and keeps all it draws 24px away, the distance stacked-dividers allows
-      // between two lines. A seam where content sits on the line, or a card on a card, is still one.
+      // clear on both sides of the line; (2) A BOX THAT PAINTS NOTHING ON THE SEAM — the side that brings
+      // no line, whose first visible content keeps away from it: 8px BELOW a box's line (the clearance (1)
+      // asks; measured: a slider's controls row under its review cards, round arrow buttons 10px down,
+      // dots 27px), 24px ABOVE one, the distance stacked-dividers allows between two lines (text ending
+      // 12px over a box reads as resting on it — the open order summary of the case that made this
+      // check). A seam where content sits on the line, or a card on a card, is still one.
       const ownDivider = !a.bottom && !!b.top && !b.top.shadow && !b.sides && !a.sides && !(a.bg && a.r.width < b.r.width - 1)
         && gapTo(a.el, 'bottom', false) >= 8 && gapTo(b.el, 'top', false) >= 8;
-      const clearBelow = !b.bg && !b.top && gapTo(b.el, 'top', true) >= 24;
+      const clearBelow = !b.bg && !b.top && gapTo(b.el, 'top', true) >= 8;
       const clearAbove = !a.bg && !a.bottom && gapTo(a.el, 'bottom', true) >= 24;
       if (ownDivider || clearBelow || clearAbove) continue;
       seams.push({ a, b, y: round(a.r.bottom) });
