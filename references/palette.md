@@ -106,8 +106,9 @@ applies to every page of the store. Ask the api for `GET /docs/custom_code_css_j
 
 ⚠️ `stores_custom_code` is a SEPARATE permission from `stores_write`, and `preflight.mjs` will not
 catch a missing one — it probes read scopes only, by its own admission. A key that can restyle a store
-may still get a 403 here. If it does, the merchant ticks `Custom code` on the Stores row of the key's
-permission grid and saves; the key does not need reissuing.
+may still get a 403 here. If it does, its `data.missing_grants` names the tick — the row and the column on
+the key's permission grid (`Custom code` on the Stores row, where a plugin is too old to name it) — and
+the merchant ticks exactly that and saves; the key does not need reissuing.
 
 ## Fonts
 

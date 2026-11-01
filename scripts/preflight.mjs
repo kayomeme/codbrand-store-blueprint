@@ -267,6 +267,13 @@ async function main(base) {
    */
   const isHttpsRefusal = (res) => res.status === 403 && res.body?.code === 'cl_api_https_required';
   const HTTPS_HINT = 'the site is behind a TLS proxy the plugin cannot see through — your key is fine';
+  /* A permission refusal names the box the store owner ticks: `data.missing_grants`, row → column on the
+   * key's form (/docs/scopes_and_grants). A plugin too old to name it gets the caller's own words. */
+  const tickFor = (res, fallback) => {
+    const grants = res.body?.data?.missing_grants;
+    if (!Array.isArray(grants) || !grants.length) return fallback;
+    return `ask the store owner to tick ${grants.map((g) => `${g.row} → ${g.column} (${g.scope})`).join(', ')}`;
+  };
 
   console.log(`\nPreflight → ${base}\n`);
 
@@ -338,8 +345,8 @@ async function main(base) {
       line(false, `${path.padEnd(32)} — HTTPS gate refused it, not a scope problem. ${HTTPS_HINT}`);
       httpsRefused.push(path);
     } else if (res.status === 403) {
-      line(false, `${path.padEnd(32)} — no scope for it. ${why}`);
-      forbidden.push(path);
+      line(false, `${path.padEnd(32)} — ${tickFor(res, 'no scope for it')}. ${why}`);
+      forbidden.push(`${path}${tickFor(res, '') && ` — ${tickFor(res, '')}`}`);
     } else if (res.status === 404) {
       line(false, `${path.padEnd(32)} — door not found (HTTP 404). ${why}`);
       missing.push(path);
@@ -377,7 +384,7 @@ async function main(base) {
     } else if (isHttpsRefusal(res)) {
       line(false, `${path.padEnd(32)} — HTTPS gate refused it, not a scope problem. ${HTTPS_HINT}`);
     } else if (res.status === 403) {
-      line(false, `${path.padEnd(32)} — no scope. ${why}`);
+      line(false, `${path.padEnd(32)} — ${tickFor(res, 'no scope')}. ${why}`);
     } else {
       line(false, `${path.padEnd(32)} — HTTP ${res.status}. ${why}`);
     }

@@ -4,6 +4,7 @@
  *
  *   node handover.mjs <site-url> <api-key> [--wordmark-intended "why there is no logo image"]
  *                     [--block-kept <custom-block-id> "why this build did not write it"] …
+ *                     [--floating-bar "why the merchant wants a header bar only as wide as its content"]
  *
  * `preflight.mjs` asks whether a build can START. This asks whether it may END. It is the
  * UNCONDITIONAL gate: `match.mjs` only runs when the merchant named a reference site, which most of
@@ -46,8 +47,9 @@
  *      space. With 0 vertical padding the nav row touches whatever comes next, while the height setting
  *      reads back exactly as written. Measured 21-09-2026: `height:221px` stored, a header about 103px
  *      tall on the page. A height that is not a real length (`auto`, `0`) is worse: the plugin still
- *      zeroes the card design's padding for it. Each side is judged by its own layout: phones can have
- *      their own (`main_header_mobile_layout`), and the plugin compiles each side apart.
+ *      zeroes the bar's padding for it. Each side is judged by its own layout and height: phones can
+ *      have their own (`main_header_mobile_layout`, a phone height), and the plugin compiles each side
+ *      apart. The bar's own padding counts before its card design's.
  *
  *   6. THE SEE-THROUGH STUCK HEADER. Once a sticky header sticks, whichever rule wins the cascade
  *      paints it. A transparent winner lets the page scroll visibly through the bar, and nothing at
@@ -105,6 +107,19 @@
  *      it; a pointer at 0 shows the first active design of its type, and one at a missing design falls
  *      back the same way (see checkPointers()).
  *
+ *  17. THE PAGE BESIDE THE STUCK BAR. A sticky header whose background is only as wide as its width
+ *      mode lets the page scroll visibly beside the stuck bar; a Bottom Row whose width differs from the
+ *      bar's background looks broken (see checkHeaderWidths()).
+ *
+ *  18. THE CARDS THAT TOUCH. A products, categories or reviews list whose gap is 0 shows its cards
+ *      touching, and a reviews summary beside the list touching the first card. A WARNING when the cards
+ *      draw their edge (see checkListGaps()).
+ *
+ *  19. THE CLOCK NOBODY SET. Sale ends, countdowns and topbar dates are read in the site's time zone, and
+ *      a fresh install keeps UTC whatever country the store sells in: a sale written to end at midnight
+ *      ends hours off. A WARNING when the site runs on UTC or a fixed offset; only the build knows where
+ *      the customers are.
+ *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
  *
@@ -140,6 +155,11 @@ const keptBlocks = new Map();
  * silently ate the site URL when no flag was passed, and every no-flag case then failed with a usage
  * error that LOOKED like a real refusal. */
 const flagValues = new Set(flagAt === -1 ? [] : [flagAt + 1]);
+/* `--floating-bar "<why>"`: the merchant chose a header whose background stops at its width mode (a boxed or
+ * floating bar), so the page showing beside it while it is stuck is the design, not a defect. */
+const floatAt = argv.findIndex((a) => a === '--floating-bar');
+const floatingReason = floatAt === -1 ? null : (argv[floatAt + 1] ?? '');
+if (floatAt !== -1) flagValues.add(floatAt + 1);
 argv.forEach((a, i) => {
   if (a !== '--block-kept') return;
   flagValues.add(i + 1).add(i + 2);
@@ -949,19 +969,56 @@ async function readPageBackgrounds(call, R, resolve, designs) {
 }
 
 /**
- * The value the plugin's header compiler treats as "a height is set". It mirrors
- * StyleManagerBK_cl::getSingleCssPropertyValue($style, 'height', true) (styleManagerBK.php:550-596):
- * a var(), else any word, else any number with or without a unit, each found as `height:` followed
- * DIRECTLY by the value, the first match winning; '' when none matches. generated_css.php:31 then
- * emits the padding guard (`padding-top/bottom: 0 !important`) for ANY non-empty value on a one-row
- * layout. Mirrored, not improved: this check has to agree with what the plugin compiles, and the
- * plugin counts `auto`, `0` or a bare `60` as a set height.
+ * One property's value as the plugin reads it: StyleManagerBK_cl::getSingleCssPropertyValue($style,
+ * $prop, true) (styleManagerBK.php:515-577, since 15-10-2026). Only the property's OWN declaration — the
+ * first `;`-separated part whose name, leading spaces trimmed, is the property — read from the very
+ * start of its value: a var(), else a word, else a number with or without a unit; '' when none. So
+ * `height: 60px` (a space after the colon) reads as no height, as it does in the plugin. Mirrored, not
+ * improved: this check has to agree with what the plugin compiles.
+ */
+function pluginCssValue(style, prop) {
+  for (const decl of String(style ?? '').split(';')) {
+    const colon = decl.indexOf(':');
+    if (colon === -1 || decl.slice(0, colon).replace(/^\s+/, '') !== prop) continue;
+    const v = decl.slice(colon + 1);
+    const m = v.match(/^(var\([^)"']+\))/) || v.match(/^(-?[a-zA-Z][a-zA-Z-]*)/) || v.match(/^(-?\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw)?)/);
+    return m ? m[1] : '';
+  }
+  return '';
+}
+
+/** The header compiler takes the spaces out around each colon before some of its reads. */
+const tightCss = (style) => String(style ?? '').replace(/\s*:\s*/g, ':');
+
+/**
+ * The value the plugin's header compiler treats as "a height is set" (generated_css.php:54,
+ * `$headerFixedHeight`, read from main_header_container_style as stored). The padding guard
+ * (`padding-top/bottom: 0 !important`, :72-81) then goes on every side whose layout is not `stacked`
+ * for ANY non-empty value: the plugin counts `auto`, `0` or a bare `60` as a set height.
  */
 function pluginHeightGuardValue(style) {
-  const s = String(style ?? '');
-  const m = s.match(/height:(var\([^)]+\))/) || s.match(/height:([a-zA-Z-]+)/)
-    || s.match(/height:(-?\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw)?)/);
-  return m ? m[1] : '';
+  return pluginCssValue(style, 'height');
+}
+
+/**
+ * The bar's height on phones (main_header_container_mobile_style; generated_css.php:67-68, `$phoneBarHeight`):
+ * kept only as a length of 0 or more, '' when unset — and then the height above applies on phones too.
+ */
+function phoneBarHeight(settings) {
+  const v = String(pluginCssValue(tightCss(settings.main_header_container_mobile_style), 'height'));
+  return /^(\d+(\.\d+)?(px|em|rem)|0)$/.test(v) ? v : '';
+}
+
+/**
+ * The bar's OWN top and bottom padding (main_header_container_style for every screen,
+ * main_header_container_mobile_style for phones; generated_css.php:57-63). Where one is set it wins over
+ * the card design's, side by side; where it is not, the card design's applies. The height guard zeroes
+ * it like any other padding.
+ */
+function barPadding(settings) {
+  const read = (style) => ({ 'padding-top': String(pluginCssValue(tightCss(style), 'padding-top')),
+    'padding-bottom': String(pluginCssValue(tightCss(style), 'padding-bottom')) });
+  return { all: read(settings.main_header_container_style), phone: read(settings.main_header_container_mobile_style) };
 }
 
 /**
@@ -993,6 +1050,22 @@ function hasVerticalPadding(map, guarded) {
 }
 
 /**
+ * Does one side of the bar get any top or bottom padding? Under the guard, only the card design's
+ * !important padding survives (the bar's own is zeroed with the rest). Otherwise each of the two is the
+ * bar's own where it is set — on phones the phone value first — and the card design's where it is not.
+ */
+function sidePadded(side, map, guarded, bar) {
+  if (guarded) return !!map && hasVerticalPadding(map, true);
+  const value = (prop) => {
+    const own = side === 'phones' ? (bar.phone[prop] || bar.all[prop]) : bar.all[prop];
+    if (own !== '') return own;
+    const e = map?.get(prop);
+    return e ? e.value : '0';
+  };
+  return !(isZeroLength(value('padding-top')) && isZeroLength(value('padding-bottom')));
+}
+
+/**
  * Which layout each side of a header compiles with. Desktop — 768px and wider — is
  * `main_header_layout`. Phones — below 768px — are `main_header_mobile_layout`, unless it is `same`
  * (the default) or absent (an install that predates the key), when phones follow desktop.
@@ -1016,12 +1089,14 @@ function headerLayouts(settings) {
  * A side sizes to its content in three cases (generated_css.php: `height: fit-content`, then the
  * design's style, then the guard):
  *   a. `stacked`: it forces `height:auto` over any height and never gets the guard, so the bar is its
- *      two rows plus the card design's top and bottom padding.
- *   b. a one-row layout with NO height: no guard either, so the card design's padding is again the
- *      only vertical space. The shipped `height:60px` avoids this; removing it re-opens it.
+ *      two rows plus its top and bottom padding.
+ *   b. a one-row layout with NO height: no guard either, so that padding is again the only vertical
+ *      space. The shipped `height:60px` avoids this; removing it re-opens it.
  *   c. a one-row layout whose height is not a real length (`auto`, `0`, a bare number): the plugin
  *      still counts it as set and zeroes the padding, so only !important padding survives.
- * A one-row side with a real height has room and is not checked here.
+ * A one-row side with a real height has room and is not checked here. The padding is the bar's own
+ * where it is set (barPadding(), since 31-10-2026), else the card design's; on phones a phone height
+ * (phoneBarHeight(), since 01-11-2026) replaces the one above and, alone, guards phones.
  */
 function checkHeaderVerticalSpace(headers, presetsById) {
   const problems = [];
@@ -1030,6 +1105,8 @@ function checkHeaderVerticalSpace(headers, presetsById) {
     const style = d.settings.main_header_container_style ?? '';
     const heightValue = pluginHeightGuardValue(style);
     const fixed = headerHasFixedHeight(style);
+    const phoneHeight = phoneBarHeight(d.settings);
+    const bar = barPadding(d.settings);
     const layouts = headerLayouts(d.settings);
     const id = Number(d.settings.main_header_container_preset ?? 0);
     const preset = presetsById.get(String(id));
@@ -1041,11 +1118,13 @@ function checkHeaderVerticalSpace(headers, presetsById) {
     let judged = false;
     for (const [side, map] of [['desktop', at?.desktop], ['phones', at?.phone]]) {
       const stacked = layouts[side] === 'stacked';
-      if (!stacked && fixed) continue;
+      // On phones a phone height, where set, replaces the one above (`0` gives the bar no height of its own).
+      const sideFixed = side === 'phones' && phoneHeight !== '' ? headerHasFixedHeight(`height:${phoneHeight}`) : fixed;
+      if (!stacked && sideFixed) continue;
       judged = true;
-      // generated_css.php never emits the guard for a `stacked` pass.
-      const guarded = !stacked && heightValue !== '';
-      if (map && hasVerticalPadding(map, guarded)) continue;
+      // generated_css.php never emits the guard for a `stacked` pass; a phone height alone guards phones.
+      const guarded = !stacked && (heightValue !== '' || (side === 'phones' && phoneHeight !== ''));
+      if (sidePadded(side, map, guarded, bar)) continue;
       flatIn[guarded ? 'guard' : stacked ? 'stacked' : 'noHeight'].push(side);
     }
     if (judged) checked++;
@@ -1059,13 +1138,13 @@ function checkHeaderVerticalSpace(headers, presetsById) {
     if (flatIn.guard.length) {
       const flat = flatIn.guard;
       problems.push(
-        `${lead(flat)}: the header's height is \`${heightValue}\`, which gives the bar no height of its own on ${flat.join(' or on ')}, ` +
+        `${lead(flat)}: the header's height is \`${heightValue || phoneHeight}\`, which gives the bar no height of its own on ${flat.join(' or on ')}, ` +
         'yet the plugin still counts it as a set height.\n' +
-        '      Any height value switches on the rule that zeroes the card design\'s top and bottom padding,\n' +
-        '      a rule meant for a fixed-height bar. So this bar is only as tall as its content, with no\n' +
-        '      padding at all. Set a real length (the shipped value is 60px), or remove the height and give\n' +
-        '      the card design padding-top and padding-bottom in css_default AND css_mobile. See\n' +
-        '      api-recipes.md → "Header height: what sets it depends on the layout".'
+        '      Any height value switches on the rule that zeroes the bar\'s top and bottom padding (its own and\n' +
+        '      its card design\'s), a rule meant for a fixed-height bar. So this bar is only as tall as its\n' +
+        '      content, with no padding at all. Set a real length (the shipped value is 60px), or remove the\n' +
+        '      height and give the bar top and bottom padding. See api-recipes.md → "Header height: what sets\n' +
+        '      it depends on the layout".'
       );
     }
 
@@ -1073,28 +1152,29 @@ function checkHeaderVerticalSpace(headers, presetsById) {
       ? `it points at card design #${id}, which does not exist on this install, so nothing pads it`
       : !at
         ? `its card design #${id} "${preset.title}" is switched off (is_active "${preset.is_active}"), so it compiles no CSS at all`
-        : `its card design #${id} "${preset.title}" sets no top or bottom padding on ${flat.join(' or on ')} ` +
+        : `neither the bar (\`main_header_container_style\`${flat.includes('phones') ? ', `main_header_container_mobile_style`' : ''}) nor ` +
+          `its card design #${id} "${preset.title}" sets top or bottom padding on ${flat.join(' or on ')} ` +
           `(css_default \`${preset.css_default || '—'}\`, css_mobile \`${preset.css_mobile || '—'}\`)`);
     if (flatIn.stacked.length) {
       problems.push(
         `${lead(flatIn.stacked)}: the header layout is \`stacked\`, and ${why(flatIn.stacked)}.\n` +
-        '      A stacked header ignores `height` and sizes to its two rows, so the card design\'s top and\n' +
-        '      bottom padding is the ONLY vertical space it has. Without it the logo sits on the bar\'s top\n' +
-        '      edge and the nav row touches whatever comes next, while the height reads back as written.\n' +
-        '      Give the card design padding-top and padding-bottom in css_default AND css_mobile. Check its\n' +
-        '      used_count first: if it is shared, create a card design for the header alone. See\n' +
-        '      api-recipes.md → "Header height: what sets it depends on the layout".'
+        '      A stacked header ignores `height` and sizes to its two rows, so its top and bottom padding is\n' +
+        '      the ONLY vertical space it has. Without it the logo sits on the bar\'s top edge and the nav row\n' +
+        '      touches whatever comes next, while the height reads back as written. Give the bar its own\n' +
+        '      padding-top and padding-bottom (main_header_container_style, and _mobile_style for phones), or,\n' +
+        '      on an install whose header style refuses padding, its card design (css_default AND css_mobile;\n' +
+        '      check its used_count first). See api-recipes.md → "Header height: what sets it depends on the layout".'
       );
     }
     if (flatIn.noHeight.length) {
       problems.push(
         `${lead(flatIn.noHeight)}: the header has no height, so it sizes to its content, and ${why(flatIn.noHeight)}.\n` +
-        '      With no height the bar is only as tall as its content plus the card design\'s top and\n' +
-        '      bottom padding, the same as a stacked header. Without that padding the logo sits on the\n' +
-        '      bar\'s top edge and the nav row touches whatever comes next. Give the card design\n' +
-        '      padding-top and padding-bottom in css_default AND css_mobile (check its used_count first:\n' +
-        '      if it is shared, create a card design for the header alone), or set a height again: the\n' +
-        '      shipped value is 60px. See api-recipes.md → "Header height: what sets it depends on the layout".'
+        '      With no height the bar is only as tall as its content plus its top and bottom padding, the\n' +
+        '      same as a stacked header. Without that padding the logo sits on the bar\'s top edge and the nav\n' +
+        '      row touches whatever comes next. Give the bar its own padding-top and padding-bottom\n' +
+        '      (main_header_container_style, and _mobile_style for phones) — or, where the header style refuses\n' +
+        '      padding, its card design (css_default AND css_mobile; check its used_count first) — or set a\n' +
+        '      height again: the shipped value is 60px. See api-recipes.md → "Header height: what sets it depends on the layout".'
       );
     }
   }
@@ -1221,6 +1301,57 @@ function checkStickyHeaders(headers, presetsById, resolve, version) {
 }
 
 /**
+ * 17 — THE PAGE BESIDE THE STUCK BAR. The bar's background — its card design, its sticky colour — reaches
+ * as far as `main_header_background_width` says: `screen`, across the screen, or `bar`, only as wide as
+ * the width mode. A sticky header in any width mode but `cl-full-width`, on `bar`, lets the page scroll
+ * visibly beside the stuck bar: measured, 48px strips on a desktop, 20px on a phone, 368px each side at
+ * 1920. A design saved before the setting existed keeps `bar`. And a Bottom Row whose width resolves
+ * differently from the bar's background looks broken — a full-screen row under a boxed bar. Before the
+ * setting existed, the bar always stopped at its width mode and only `cl-full-width` closed the gap.
+ */
+function checkHeaderWidths(headers) {
+  const problems = [];
+  const notes = [];
+  let checked = 0;
+  for (const d of headers) {
+    const s = d.settings;
+    const full = String(s.main_header_width_mode ?? '') === 'cl-full-width';
+    const has = 'main_header_background_width' in s;
+    const bg = has ? String(s.main_header_background_width) : 'bar';
+    if (yes(s.main_header_is_sticky) && !full) {
+      checked++;
+      if (!has) {
+        notes.push(`${d.label}: the header is sticky in the width mode \`${s.main_header_width_mode}\`, and this plugin has no\n` +
+          '    `main_header_background_width`: while the bar is stuck the page shows beside it, and the only setting\n' +
+          '    that closes it here is the width mode `cl-full-width`. A newer plugin adds the switch.');
+      } else if (bg !== 'screen') {
+        if (String(floatingReason ?? '').trim().length >= MIN_REASON) {
+          line(true, `${d.label}: a floating header bar, declared intentional: "${String(floatingReason).trim()}"`);
+        } else {
+          problems.push(`${d.label}: the header is sticky in the width mode \`${s.main_header_width_mode}\` and its background is only\n` +
+            `      as wide as the bar (\`main_header_background_width\`: \`${bg}\`), so while it is stuck the page scrolls\n` +
+            '      visibly beside it. Set `main_header_background_width` to `screen` (/docs/header_global_settings →\n' +
+            '      "The bar and the Bottom Row: one width"). If the merchant asked for a floating bar, say so:\n' +
+            `        --floating-bar "<why, at least ${MIN_REASON} characters>"`);
+        }
+      }
+    }
+    const rowUsed = ['end_menu_position', 'end_menu_mobile_position'].some((k) => String(s[k] ?? '') === 'bottom_row');
+    if (rowUsed && !full && 'main_header_bottom_row_width' in s) {
+      checked++;
+      const row = String(s.main_header_bottom_row_width);
+      const rowWidth = row === 'same' ? bg : row;
+      if (rowWidth !== bg) {
+        problems.push(`${d.label}: the bar's background is \`${bg}\` wide and its Bottom Row \`${rowWidth}\`, so one stops where the\n` +
+          '      other runs on — a full-screen row under a boxed bar, or the reverse, looks broken. Set\n' +
+          '      `main_header_bottom_row_width` to `same` (/docs/header_global_settings → "The bar and the Bottom Row: one width").');
+      }
+    }
+  }
+  return { checked, problems, notes };
+}
+
+/**
  * 7 — THE FLUSH BAND. For every design the store uses and every `*_container_preset` it sets: when
  * that card design paints a background the page does not have, it needs side padding of its own, at
  * each breakpoint. The same rule `codbrand-content-builder` applies to a page block, in its words.
@@ -1293,6 +1424,115 @@ async function checkBands(designs, presetsById, resolve, pageBackgrounds) {
     );
   }
   return { checked, problems };
+}
+
+/* The lists whose cards stand side by side or one under another: the key holding the space between the
+ * cards, and the card's own look (a card design, and a style on the same element). */
+const CARD_LISTS = {
+  plist1: { gap: 'plist1_products_container_style', preset: 'single_product_preset', style: 'single_product_style', cards: 'product cards' },
+  catlist: { gap: 'cl_categories_container_style', preset: 'category_item_preset', style: 'category_item_style', cards: 'category cards' },
+  reviewlist: { gap: 'cl_reviews_container_style', preset: 'review_item_preset', style: 'review_item_style', cards: 'review cards' },
+};
+/* A page design that shows a list through a design it names itself, not the store's: [page type, the key
+ * naming the list design, the list type, the prefix of the page's keys that override the list's own]. */
+const LIST_TEMPLATES = [['product', 'reviews_design_template', 'reviewlist', 'reviews_'], ['category', 'design_template', 'plist1', '']];
+
+const BORDER_LINE = /^(solid|dashed|dotted|double|groove|ridge|inset|outset)$/i;
+
+/** What draws a card's edge — a border, a background or a shadow — or '' when nothing does. */
+function cardEdge(map, resolve) {
+  for (const [prop, { value }] of map) {
+    if (!/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-style)?$/.test(prop)) continue;
+    const t = tokens(value);
+    if (!t.some((x) => BORDER_LINE.test(x)) || t.some((x) => /^[\d.]/.test(x) && isZeroLength(x))) continue;
+    const width = map.get('border-width')?.value;
+    if (width === undefined || !tokens(width).every((x) => isZeroLength(x))) return `a border (${prop}: ${value})`;
+  }
+  const paint = paintOf(map, resolve);
+  if (paint.colour) return `a background (${describe(paint.colour)})`;
+  if (paint.image || paint.unresolved) return `a background (${paint.text})`;
+  const shadow = map.get('box-shadow')?.value;
+  return shadow && !/^none$/i.test(shadow.trim()) ? `a shadow (${shadow})` : '';
+}
+
+/**
+ * 18 — THE CARDS THAT TOUCH. A products, categories or reviews list keeps its cards apart with the `gap`
+ * of its container style, in a grid and in a slider alike, and a reviews summary shown beside the list
+ * (`summary_position: beside`) keeps the same gap from the first card. A design whose gap is 0 — an
+ * older default, a copy of one — shows touching cards, and a card that draws its edge makes it plain.
+ * Measured on one store: review cards touching for a month while every other check passed.
+ *
+ * A WARNING: joined cards can be the design. Only a gap WRITTEN as zero is read; with none written the
+ * plugin's stylesheet decides, and the browser pass (joins.js) measures that. A product page's reviews
+ * and a category page's products can show another design than the store's (LIST_TEMPLATES), so those
+ * are read too, with the page's own overrides of the layout.
+ */
+async function checkListGaps(call, R, designs, presetsById, resolve) {
+  const notes = [];
+  let checked = 0;
+  const uses = designs.filter((d) => CARD_LISTS[d.type]).map((d) => ({ d, label: d.label, over: () => undefined }));
+  const gsPath = pathFor('section_manager_global_settings', 'section_manager/global_settings', R);
+  for (const page of designs) {
+    for (const [pageType, key, type, prefix] of LIST_TEMPLATES) {
+      if (page.type !== pageType) continue;
+      const id = Number(page.settings[key]);
+      if (!(id > 0)) continue;
+      const label = `${type}/${id} (named by ${page.label} \`${key}\`)`;
+      const over = (k) => {
+        const v = page.settings[`${prefix}${k}`];
+        return v === undefined || v === '' || v === 'inherit' ? undefined : v;
+      };
+      let d = designs.find((x) => x.type === type && Number(x.id) === id);
+      if (!d) {
+        const res = await call(`${gsPath}/${type}/${id}`);
+        const settings = res.body?.settings ?? res.body?.data?.settings;
+        if (res.status === 404) {
+          notes.push(`${page.label} \`${key}\` names ${type} design #${id}, which does not exist: that page shows the first active ${type}\n` +
+            '    design instead. Its cards were NOT checked for touching. Point the key at the design you styled.');
+          continue;
+        }
+        if (res.status !== 200 || !settings || typeof settings !== 'object') {
+          notes.push(`${label} could not be read (HTTP ${res.status}), so its cards were NOT checked for touching.`);
+          continue;
+        }
+        d = { label: `${type}/${id}`, type, id, settings };
+      }
+      uses.push({ d, label, over });
+    }
+  }
+  for (const { d, label, over } of uses) {
+    const spec = CARD_LISTS[d.type];
+    const s = d.settings;
+    if (!(spec.gap in s)) {
+      notes.push(`${label}: this install's design has no \`${spec.gap}\`, so its cards were NOT checked for touching.`);
+      continue;
+    }
+    checked++;
+    const get = (k) => over(k) ?? s[k];
+    const css = cascade(new Map(), s[spec.gap]);
+    const [r, c = r] = tokens(css.get('gap')?.value ?? '');
+    const row = css.get('row-gap')?.value ?? r;
+    const col = css.get('column-gap')?.value ?? c;
+    const zero = (v) => v !== undefined && (isZeroLength(v) || /^normal$/i.test(v));
+    const slider = String(get('pagination_type')) === 'slider';
+    const oneColumn = ['desktop_columns', 'mobile_columns'].every((k) => String(get(k)) === '1');
+    const touch = [];
+    if (zero(col) && (slider || !oneColumn)) touch.push('side by side');
+    if (zero(row) && !slider) touch.push('one under the next');
+    /* The summary's gap is read the plugin's way: its own reader, spaces around the colon removed first. */
+    const beside = d.type === 'reviewlist' && yes(s.summary_is_active) && s.summary_position === 'beside'
+      && s.summary_reviews_is_active !== 'no' && isZeroLength(pluginCssValue(tightCss(s[spec.gap]), 'gap') || '20px');
+    if (!touch.length && !beside) continue;
+    const preset = presetAt(presetsById.get(String(s[spec.preset])));
+    const edge = (preset && (cardEdge(preset.desktop, resolve) || cardEdge(preset.phone, resolve)))
+      || cardEdge(cascade(new Map(), s[spec.style]), resolve);
+    if (!edge) continue;
+    const where = [touch.length ? `the cards touch ${touch.join(' and ')}` : '', beside ? 'the summary beside them touches the first card' : '']
+      .filter(Boolean).join(', and ');
+    notes.push(`${label}: 0px between its ${spec.cards} (\`${spec.gap}\`: \`${String(s[spec.gap]).trim()}\`), and each card draws ${edge}\n` +
+      `    — ${where}. Unless the reference joins its cards on purpose, set the space the design shows in that key's \`gap\`.`);
+  }
+  return { checked, notes };
 }
 
 /* The script each language is written in, by language subtag — for the right-to-left languages the
@@ -1721,7 +1961,7 @@ async function reconcileFeatures(call, R, ctx, recorded, productsRead) {
         '      A ticked feature with nothing behind it is a promise the storefront does not keep. Add them —\n' +
         '      or, if no door can, tell the merchant and record it OFF until they do.'
       );
-    } else if (name === 'countdown' && decision === 'on' && !productsRead.error && !productsRead.rows.some(onTimedSale)) {
+    } else if (name === 'countdown' && decision === 'on' && !productsRead.error && !productsRead.rows.some((p) => onTimedSale(p, ctx.clock))) {
       notes.push('feature `countdown` is ON, but no product has a sale with a start date and an end date still ahead, so the timer shows nowhere now. Tell the merchant it appears when they run a timed sale — do not invent one.');
     } else if (decision === 'on' && feature.goal && (!state || state.main) && rows && rows.count > 0) {
       const goal = await feature.goal(ctx, productsRead, rows, decisionNote(rawValue), call, R);
@@ -1735,12 +1975,46 @@ async function reconcileFeatures(call, R, ctx, recorded, productsRead) {
   return { reconciled, problems, notes };
 }
 
+/**
+ * A moment written in the store's own clock. A sale's `sale_from` / `sale_to` carry no zone: "2026-11-06 23:59"
+ * is 23:59 where the site keeps time (/docs/store_settings → "The site's time zone"). Read in the clock of the
+ * machine running this check instead, a Dubai store checked on a UTC machine kept a sale "running" four hours
+ * after it ended. The site's city zone from `/me` (`timezone`, summer time included), else its `utc_offset`,
+ * else — a plugin that reports neither — this machine's clock, as before.
+ */
+function storeTime(text, clock = {}) {
+  const s = String(text).trim().replace(' ', 'T');
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) return Date.parse(s);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!m) return Date.parse(s);
+  const [y, mo, d, h = '0', mi = '0', se = '0'] = m.slice(1);
+  const wall = Date.UTC(+y, +mo - 1, +d, +h, +mi, +se);
+  if (clock.zone) {
+    try {
+      /* The zone's offset at that moment: the wall clock it shows at a guess, the guess corrected by the
+       * difference — twice, for a time near a clock change. */
+      const fmt = new Intl.DateTimeFormat('en-US', { timeZone: clock.zone, hourCycle: 'h23', year: 'numeric',
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const shown = (t) => {
+        const p = Object.fromEntries(fmt.formatToParts(t).map((x) => [x.type, x.value]));
+        return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+      };
+      let t = wall;
+      for (let i = 0; i < 2; i++) t = wall - (shown(t) - t);
+      return t;
+    } catch { /* a zone this Node does not know: the offset below */ }
+  }
+  const off = String(clock.offset ?? '').match(/^([+-])(\d{2}):?(\d{2})$/);
+  if (off) return wall - (off[1] === '-' ? -1 : 1) * (Number(off[2]) * 60 + Number(off[3])) * 60000;
+  return Date.parse(s);
+}
+
 /** A product the countdown can render on: a sale price, with a start date and an end date still ahead. */
-function onTimedSale(p) {
+function onTimedSale(p, clock) {
   if (!(Number(p.sale_price) > 0) || String(p.sale_from ?? '').trim() === '') return false;
   const to = String(p.sale_to ?? '').trim();
   if (!to) return false;
-  const end = Date.parse(to.replace(' ', 'T'));
+  const end = storeTime(to, clock);
   return Number.isNaN(end) || end > Date.now();
 }
 
@@ -1795,7 +2069,7 @@ function partialReach(feature, reached, total, reason) {
 /**
  * The upsell's goal: a reason to add the product. A title the shopper reads, a saving they can see,
  * card text where the cards show text, on the products the merchant meant. Measured on one build: a
- * strip with no title (`always_visible` drops it), no saving and empty card text on 20 of 20
+ * strip with no title (`always_visible` dropped it), no saving and empty card text on 20 of 20
  * products, while "products carry upsells" passed.
  */
 async function goalUpsells(ctx, productsRead, rows, reason) {
@@ -1808,10 +2082,13 @@ async function goalUpsells(ctx, productsRead, rows, reason) {
     const s = d.settings;
     if (!yes(s.p_upsell_is_active)) continue;
     const title = String(s.p_upsell_header_title ?? '').trim();
-    if (String(s.p_upsell_display_type) === 'always_visible') {
+    /* `always_visible` drops the header unless its own switch shows it (a plugin without the switch
+     * always drops it): /docs/product_global_settings → "The upsell's title in always_visible". */
+    if (String(s.p_upsell_display_type) === 'always_visible' && !yes(s.p_upsell_always_visible_header_is_active)) {
       problems.push(`${d.label}: the upsell shows NO title — display type "always_visible" drops the header and its\n` +
-        `      \`p_upsell_header_title\` (${JSON.stringify(clip(title, 40))}). Use a collapsible display type, so the shopper\n` +
-        '      reads why these products are offered.');
+        `      \`p_upsell_header_title\` (${JSON.stringify(clip(title, 40))}). Switch on \`p_upsell_always_visible_header_is_active\`\n` +
+        '      (where the store has it) or use a collapsible display type, so the shopper reads why these products\n' +
+        '      are offered.');
     } else if (!title) {
       problems.push(`${d.label}: \`p_upsell_header_title\` is empty, so the upsell strip has no title.`);
     }
@@ -2251,6 +2528,14 @@ async function main(base) {
       passed.push('the header has vertical space');
     }
 
+    const widths = checkHeaderWidths(headers);
+    problems.push(...widths.problems);
+    notes.push(...widths.notes);
+    if (widths.checked && !widths.problems.length && !widths.notes.length) {
+      line(true, `the header's background reaches as far as the stuck bar and its Bottom Row (${widths.checked} checked)`);
+      passed.push('the header has one background width');
+    }
+
     const sticky = checkStickyHeaders(headers, presetsById, resolve, version);
     problems.push(...sticky.problems);
     notes.push(...sticky.notes);
@@ -2268,6 +2553,13 @@ async function main(base) {
     if (!bands.problems.length) {
       line(true, `every coloured band has side padding on desktop and on phones (${bands.checked} card design use(s) checked)`);
       passed.push('every coloured band has side padding');
+    }
+
+    const gaps = await checkListGaps(call, R, designs, presetsById, resolve);
+    notes.push(...gaps.notes);
+    if (gaps.checked && !gaps.notes.length) {
+      line(true, `the cards of every list keep a space between them (${gaps.checked} list design use(s) checked)`);
+      passed.push('cards in a list do not touch');
     }
   }
 
@@ -2314,7 +2606,8 @@ async function main(base) {
     );
   } else {
     const byType = (type) => designs.filter((d) => d.type === type);
-    const features = await reconcileFeatures(call, R, { designsOf: byType, store }, recorded, productsRead);
+    const clock = { zone: me.body.timezone, offset: me.body.utc_offset };
+    const features = await reconcileFeatures(call, R, { designsOf: byType, store, clock }, recorded, productsRead);
     problems.push(...features.problems);
     notes.push(...features.notes);
     // Zero reconciled is not a match: every key was unknown, unreadable or unmapped, and the notes say which.
@@ -2346,6 +2639,18 @@ async function main(base) {
   } else {
     line(true, 'a logged-out visitor gets the store');
     passed.push('the public sees the store');
+  }
+
+  /* ── the site's clock: every sale end, countdown and topbar date is read in its time zone ───────── */
+  const zone = me.body.timezone;
+  if (zone === undefined) {
+    notes.push('the site\'s time zone was NOT checked: this plugin does not report `timezone`.');
+  } else if (zone === '' || zone === 'UTC') {
+    notes.push(`THE SITE'S CLOCK: ${zone ? 'the site runs on UTC' : `the site keeps a fixed offset (${me.body.utc_offset ?? 'unknown'}) and no time zone`}, ` +
+      'so every sale end,\n    countdown and topbar date is read there. Unless the store\'s customers live on it, set the zone where they are\n' +
+      '    (store_settings → timezone) and write the dated rows again — api-recipes.md → "The site\'s time zone".');
+  } else {
+    line(true, `the site keeps time in ${zone} (${me.body.utc_offset ?? 'offset unknown'}): check it is where the store's customers are`);
   }
 
   /* ── the whole site's search visibility: told to the merchant, never changed here ──────────────── */

@@ -22,6 +22,10 @@
  *                       seam: a lower box's own divider with clear space on both sides of it, and a box
  *                       that paints nothing on the seam and keeps its visible content away from it — 8px
  *                       below a box, 24px above one.
+ *   touching-cards      cards of one list — siblings of one kind, each drawing its own box, 80×60px or
+ *                       more — with 0px between them, side by side or one under the next: a grid or a
+ *                       slider whose gap is 0. Measured: review cards touching in a row of three and in a
+ *                       slider for a month, while every other check passed.
  *   stacked-dividers    two horizontal rules (a top/bottom border with no side borders, or an <hr>)
  *                       within 24px of each other, from two different boxes — or a rule within 12px of
  *                       a bordered box's edge. Two bordered cards 16px apart are a list, not this. Measured:
@@ -243,6 +247,48 @@
     reported.push(s);
     flag('touching-boxes', `${describe(s.a.el)} → ${describe(s.b.el)}`,
       `0px between them at y=${s.y + round(window.scrollY)}px${lineOn(s.a.bottom, 'upper')}${lineOn(s.b.top, 'lower')} — give one of them a margin, or set their spacing`);
+  }
+
+  // ── touching-cards ────────────────────────────────────────────────────────────────────────────
+  // Cards of one list — siblings of one kind, each drawing its own box — with 0px between them, side by
+  // side or one under the next: a grid or a slider whose gap is 0. A stacked pair touching-boxes already
+  // reported is not reported twice; one it passed (cards of one colour, no line between them) runs
+  // together into one panel and is reported here. Big enough to be a card: a joined row of buttons or
+  // chips (a segmented control) is a design, not this. One finding per list.
+  const seamAt = (x, y) => reported.some((s) => [x, y].every((e) => [s.a.el, s.b.el].some((o) => o === e || o.contains(e) || e.contains(o))));
+  const drawsBox = (el) => {
+    const cs = getComputedStyle(el);
+    return ['Top', 'Right', 'Bottom', 'Left'].some((s) => edge(cs, s)) || !!shadowEdge(cs) || visiblePaint(el, cs);
+  };
+  const kindOf = (el) => `${el.tagName}.${typeof el.className === 'string' ? el.className.trim().split(/\s+/)[0] || '' : ''}`;
+  const overlapY = (a, b) => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  for (const list of new Set(qa('body *').map((el) => el.parentElement).filter(Boolean))) {
+    const byKind = new Map();
+    for (const c of Array.from(list.children)) {
+      if (SKIP.has(c.tagName.toUpperCase()) || !isShown(c)) continue;
+      const r = box(c);
+      if (r.width < 80 || r.height < 60 || getComputedStyle(c).position === 'fixed' || !drawsBox(c)) continue;
+      byKind.set(kindOf(c), (byKind.get(kindOf(c)) || []).concat({ el: c, r }));
+    }
+    for (const cards of byKind.values()) {
+      if (cards.length < 2) continue;
+      const pairs = [];
+      for (let i = 0; i < cards.length; i++) {
+        for (let j = i + 1; j < cards.length; j++) {
+          const [a, b] = [cards[i].r, cards[j].r];
+          if (overlapY(a, b) >= Math.min(a.height, b.height) * 0.5 && Math.abs(Math.max(b.left - a.right, a.left - b.right)) <= 0.5) {
+            pairs.push([cards[i], cards[j], 'side by side']);
+          } else if (overlapX(a, b) >= Math.min(a.width, b.width) * 0.5 && Math.abs(Math.max(b.top - a.bottom, a.top - b.bottom)) <= 0.5
+            && !seamAt(cards[i].el, cards[j].el)) {
+            pairs.push([cards[i], cards[j], 'one under the other']);
+          }
+        }
+      }
+      if (!pairs.length) continue;
+      const [a, b, how] = pairs[0];
+      flag('touching-cards', describe(list),
+        `${pairs.length} pair(s) of its ${cards.length} cards touch with 0px between them (${describe(a.el)} and the next, ${how}), and each card draws its own box — set the list's space between cards to the design's, unless the reference joins its cards`);
+    }
   }
 
   // ── stacked-dividers ──────────────────────────────────────────────────────────────────────────

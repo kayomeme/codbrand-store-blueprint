@@ -89,6 +89,12 @@ and a store that skips it looks broken in ways nothing else can fix:
 - **The brand name.** The footer and the browser tab render WordPress's own site title, not the store
   column — so a store can be correctly named through `stores` and still show "WordPress" in the tab.
 - **Contact details and social links**, which otherwise keep whatever the install shipped with.
+- **The site's time zone — before anything dated.** Sale ends, the product countdown and topbar dates
+  run on it, and a fresh install keeps UTC whatever country the store sells in: measured, a sale written
+  to end at 23:59 ended at 03:59 in Dubai. Set the zone where the store's customers are, once phase 1 has
+  confirmed the market; ask the merchant when their country spans several zones (the door never guesses
+  one). How, and what moves when it changes later: `/docs/store_settings` → "The site's time zone".
+  `handover.mjs` warns while the site still runs on UTC or a fixed offset.
 
 **Currency and price format are NOT here** — those are per-store columns, written through `stores`.
 That split is the single most confusing thing about these two doors; check which one owns a field
@@ -510,8 +516,9 @@ So it is made the same way, whether you add a block or rewrite a seeded one:
    loaded after it, 24px under every divider and rows wrapping.
 3. **Apply the CSS or JavaScript it hands over, at the level it names**, through the store's
    custom-code doors (`/docs/custom_code_css_js`): a surface's design, the store, a page or a product.
-   Each level has its own permission, never part of `write`; a 403 means the merchant ticks Custom code
-   for that row on the key. **Read what the level already holds, and merge**: a write replaces the
+   Each level has its own permission, never part of `write`; a 403 names the tick it needs
+   (`data.missing_grants`: the row and the column on the key's form), and the merchant ticks exactly
+   that. **Read what the level already holds, and merge**: a write replaces the
    whole field. Never put it in the content, or in the block's own "Custom CSS" field.
 
 `scripts/handover.mjs` runs `codbrand-content-builder`'s validator on the content of every custom
@@ -672,23 +679,27 @@ there changes with `main_header_layout`:
   fixes the bar's height. While it is set, the bar's top and bottom padding is zeroed so the logo can
   fill the bar.
 - **`stacked`**: `height` is ignored, and the bar always sizes to its two rows. Its vertical space comes
-  only from the top and bottom padding of the header's card design (`main_header_container_preset`),
-  set in that preset's `css_default`, plus `css_mobile` for phones. A card design with 0px vertical
-  padding renders a cramped header, whatever height you write.
+  only from its top and bottom padding: the bar's own where the header has it (below), else the card
+  design's (`main_header_container_preset`, `css_default` plus `css_mobile`). With neither, the header
+  is cramped, whatever height you write.
 - **A one-row layout with NO `height`** sizes to its content exactly like `stacked`, so its only vertical
-  space is again the card design's padding. The shipped `height:60px` has room; removing it without
-  padding the card design gives the same cramped bar. A height that is not a real length (`auto`, `0`,
-  a bare `60`) is worse: the plugin still counts it as set and zeroes the card design's padding, so the
-  bar gets none at all. Use a real length, or no height.
+  space is again that padding. The shipped `height:60px` has room; removing it without padding gives the
+  same cramped bar. A height that is not a real length (`auto`, `0`, a bare `60`) is worse: the plugin
+  still counts it as set and zeroes all of that padding, so the bar gets none at all. Use a real length,
+  or no height.
 
 **These rules apply to each side with its own layout.** When phones have a layout of their own
 (`main_header_mobile_layout`, above), the plugin compiles desktop and phones apart: a `stacked` phone
 layout ignores `height` on phones while a one-row desktop keeps it, and the padding is zeroed only on a
 side whose layout is not `stacked`. So a desktop that looks right says nothing about the phone bar.
 
-The header's style door refuses `padding` on purpose, because padding belongs to the card design.
-Check the preset's `used_count` before you edit it: a card design can be shared, and new padding lands
-on every surface that uses it. If it is not the header's alone, create one for the header through
+**Pad the bar itself where the header allows it.** A current install takes the bar's own top and bottom
+padding in `main_header_container_style`, and a height and padding for phones in
+`main_header_container_mobile_style`; they win over the card design's, side by side, and touch no other
+surface (`/docs/header_global_settings` → "The space above and below the bar"). An older install refuses
+padding there, because padding belonged to the card design: then pad the card design, and check its
+`used_count` before you edit it: a card design can be shared, and new padding lands on every surface
+that uses it. If it is not the header's alone, create one for the header through
 `design_controls/presets` (an `apply` entry with no id creates one), and point
 `main_header_container_preset` at it. Leave `force_styles` off on that card design and on the two menu
 text designs (`main_nav_items_text_preset`, `end_menu_items_text_preset`). It adds `!important` to
@@ -696,10 +707,24 @@ every declaration, so the stuck bar's own background and text colour could no lo
 
 `handover.mjs` fails any header that sizes to its content (`stacked`, no height, or a height that is not
 a real length) without top and bottom padding on desktop or on phones, judging each side by its own
-layout, and a sticky header whose bar is not opaque once it sticks.
+layout and height and the bar's own padding before the card design's, and a sticky header whose bar is
+not opaque once it sticks.
 
 *Added 21-09-2026: a build set `height:221px` on a stacked header whose card design had 0px vertical
 padding. The height did nothing, the style door refused padding, and the header shipped cramped.*
+
+### The bar's background reaches across the screen
+
+The width mode places the header's CONTENT; how far its colours reach is a second setting,
+`main_header_background_width`: `screen`, across the screen, or `bar`, only as wide as the width mode.
+On `bar`, a sticky header lets the page scroll visibly beside the stuck bar in every width mode but
+`cl-full-width`. **On every header you write, set `main_header_background_width` to `screen` and
+`main_header_bottom_row_width` to `same`** (the Bottom Row then follows the bar), unless the merchant asked
+for a floating bar. A design saved before the setting existed keeps `bar`: when you restyle an established
+store's header, offer the switch. `/docs/header_global_settings` → "The bar and the Bottom Row: one
+width". `handover.mjs` fails a sticky header that leaves the page showing beside it, and a Bottom Row whose
+width differs from the bar's; a floating bar the merchant chose passes with `--floating-bar "<why>"`. An
+install older than the setting has no such key: there only `cl-full-width` closes the gap.
 
 ## Verify at the end, in the browser
 

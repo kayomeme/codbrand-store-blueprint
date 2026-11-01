@@ -247,7 +247,7 @@ escapes**, because a row present only in your build is reported and not failed.
 | `footer.gutter_left` · `footer.bottom_bar_gutter_left` | **these two should agree.** A mismatch is a real defect and very easy to miss by eye |
 | `page.background` · `page.max_width` · `page.gutter` | |
 
-**When the store shows reviews or a product grid, measure those too**, with these fixed ids. A
+**When the store shows reviews, a product grid or a categories list, measure those too**, with these fixed ids. A
 component the plugin renders is styled once, in its design, and shows on every page that places it —
 so these rows are where a design left at its shipped look gets caught.
 
@@ -259,6 +259,7 @@ so these rows are where a design left at its shipped look gets caught.
 | `reviews.text_lines` | lines of review text shown before it is cut; `0` when it is never cut |
 | `reviews.name_font_family` · `reviews.name_font_size` · `reviews.name_font_style` | |
 | `reviews.badge_present` · `reviews.date_kind` | the verified-buyer badge; `date_kind`: `relative`, `absolute` or `none` |
+| `reviews.card_gap` · `plist1.card_gap` · `catlist.card_gap` | the space between two cards next to each other in one list, in px: beside the first card on its row, or under it when the list stacks one per row; `null` when it shows one card. `0` means they touch: right only where the reference joins its cards |
 | `plist1.card_bottom_row` | what shares the card's last row, left to right, joined by `+`: `"price+button"`, or `"button"` alone. A **string**, never an array — `match.mjs` treats an array as readable without a render, and a row's layout is not |
 | `plist1.button_kind` · `plist1.badge_position` | `button_kind`: `text`, `icon` or `none`; `badge_position`: `image` (over the photo), `inline` or `none` |
 | `plist1.columns` · `plist1.card_ratio` | the cards a visitor sees side by side — a carousel's cards scrolled out of view do not count; the first card's image, width over height |

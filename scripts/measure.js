@@ -34,8 +34,8 @@
  *   `"reason": { "kind": "unmeasurable" }` and what it tried. match.mjs reports such a row and never
  *   passes it: measure that row by hand and replace it in the file.
  * - `"value": null` WITHOUT a reason means the page has no such surface (no topbar, no reviews).
- * - The review-card and product-card rows are read on a plugin store only. Every theme builds those
- *   differently, so on a reference they come back unmeasurable, for you to measure by hand.
+ * - The review-card, product-card and category-card rows are read on a plugin store only. Every theme
+ *   builds those differently, so on a reference they come back unmeasurable, for you to measure by hand.
  *
  * DEFINITIONS the checklist leaves open, fixed here so both passes agree:
  * - `footer.columns` counts column groups: one per heading (a short title, 40 characters or fewer),
@@ -48,6 +48,9 @@
  *   grid has no thumbnails. Thumbnails are a set of same-size images of 40px or more by the photo.
  * - `reviews.card_border` is the card's top border (`none` when it has none), `reviews.card_padding`
  *   its left padding.
+ * - `reviews.card_gap`, `plist1.card_gap` and `catlist.card_gap` are the space between the first card and
+ *   the nearest one beside it on its row (either side, so a right-to-left list reads the same), or under
+ *   it when the list stacks one card per row. `null` when the list shows one card: nothing to space.
  * - `header.height` excludes a topbar that sits inside the reference's <header>.
  * - Every gutter row is measured from the side text starts on: the left, or the right on a
  *   right-to-left page. The `_left` in `header.gutter_left` names the usual case, not the side.
@@ -837,8 +840,23 @@
 
   // ── reviews and the product card: read on a plugin store only ─────────────────────────────────
   const reviewIds = ['reviews.card_background', 'reviews.text_color', 'reviews.card_border', 'reviews.card_padding', 'reviews.avatar_kind',
-    'reviews.text_lines', 'reviews.name_font_family', 'reviews.name_font_size', 'reviews.name_font_style', 'reviews.badge_present', 'reviews.date_kind'];
-  const cardIds = ['plist1.card_bottom_row', 'plist1.button_kind', 'plist1.badge_position', 'plist1.columns', 'plist1.card_ratio'];
+    'reviews.text_lines', 'reviews.name_font_family', 'reviews.name_font_size', 'reviews.name_font_style', 'reviews.badge_present', 'reviews.date_kind',
+    'reviews.card_gap'];
+  const cardIds = ['plist1.card_bottom_row', 'plist1.button_kind', 'plist1.badge_position', 'plist1.columns', 'plist1.card_ratio', 'plist1.card_gap'];
+  const catIds = ['catlist.card_gap'];
+  /** The space from the first card to the nearest one beside it on its row, else to the one under it —
+   *  in the first card's own list: a second list further down the page is not its neighbour. */
+  const cardGap = (id, cards) => {
+    const listOf = (c) => c.closest('.cl_list') || c.parentElement;
+    const a = box(cards[0]);
+    const rest = cards.slice(1).filter((c) => listOf(c) === listOf(cards[0])).map(box);
+    const beside = rest.filter((r) => Math.abs(r.top - a.top) <= 4 && (r.left >= a.right - 1 || r.right <= a.left + 1))
+      .map((r) => Math.max(r.left - a.right, a.left - r.right));
+    const under = rest.filter((r) => r.top >= a.bottom - 1).map((r) => r.top - a.bottom);
+    const gaps = beside.length ? beside : under;
+    if (gaps.length) px(id, Math.min(...gaps), 2);
+    else add(id, null);
+  };
   const byHand = 'every theme builds this differently, so it is read on a store built with the plugin only — measure it by hand on the reference';
 
   section(reviewIds, () => {
@@ -876,6 +894,7 @@
     add('reviews.badge_present', qa('.cl-review-verified-badge').some(isShown));
     const date = q('.cl-review-date', card);
     const d = text(date);
+    cardGap('reviews.card_gap', cards);
     add('reviews.date_kind', !date || !isShown(date) || !d ? 'none'
       : (/\b(1[89]|20)\d{2}\b|\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|janv|févr|mars|avr|mai|juin|juil|août|sept|oct|nov|déc/i.test(d) ? 'absolute' : 'relative'));
   });
@@ -924,6 +943,18 @@
     const photo = q('.cl_image img', card);
     if (photo && isShown(photo) && box(photo).height) add('plist1.card_ratio', Math.round((box(photo).width / box(photo).height) * 100) / 100, { tolerance: 0.02 });
     else unmeasurable('plist1.card_ratio', 'the first card has no visible image');
+    cardGap('plist1.card_gap', cards);
+  });
+
+  section(catIds, () => {
+    if (!pluginStore) { catIds.forEach((id) => unmeasurable(id, byHand)); return; }
+    const cards = qa('.catlist .cl_item').filter(isShown);
+    if (!cards.length) {
+      if (q('.catlist')) catIds.forEach((id) => unmeasurable(id, 'the categories list is on the page but shows no cards yet — let the page settle and run again'));
+      else absent(catIds);
+      return;
+    }
+    cardGap('catlist.card_gap', cards);
   });
 
   // ── the product page: read on a product page only, on both passes ─────────────────────────────
