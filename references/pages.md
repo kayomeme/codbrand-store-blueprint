@@ -49,6 +49,11 @@ stale legal rule is worse than none**, so no jurisdiction rule is baked in here.
 **Never claim compliance, and never present a draft as legal advice.** Say which market each page was
 drafted for, and that a local check is the merchant's to make.
 
+**A showcase is the one exception to the "unverified" line on the page** — a store built to be shown, not
+to sell yet (blueprint `purpose: showcase`, `SKILL.md` → "Asking"): its legal pages read as a real store's,
+with no draft line and no "to be completed", because it takes no real orders. The hand-over still says they
+are unverified drafts, and that the line goes back the day the store starts to sell.
+
 This is the quality gate below, applied harder. That gate says *"a thin, obviously-generic FAQ is
 worse than no FAQ — it signals a template store."* **A confidently-worded generic Terms page is
 worse than an empty one, because it LOOKS like compliance and is not.**

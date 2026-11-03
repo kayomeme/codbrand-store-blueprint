@@ -177,8 +177,12 @@ function buildPalette(seedHex, archetypeName) {
   const a = ARCHETYPES[archetypeName];
   const [, seedC, seedH] = labToLch(rgbToLab(hexToRgb(seedHex)));
 
-  /* A near-grey seed carries no usable hue, so anchor it rather than amplify sensor noise. */
-  const hue = seedC < 4 ? 40 : seedH;
+  /* A near-grey seed carries no usable hue, so anchor it rather than amplify sensor noise — and keep the
+   * brand grey. Until 01-11-2026 the anchor came with the archetype's full brand chroma, so a black-and-white
+   * brand got back an orange-brown accent nobody chose (measured on one store: black and white with one red).
+   * The sale colour keeps its red: it is a signal, not the brand. */
+  const achromatic = seedC < 4;
+  const hue = achromatic ? 40 : seedH;
 
   /*
    * The archetype's chroma is a TARGET, not a ceiling clamped to the seed's own saturation.
@@ -193,13 +197,16 @@ function buildPalette(seedHex, archetypeName) {
    * up. That is the archetype doing the job the merchant picked it for. `ramp()` still gamut-maps,
    * so an unreachable target degrades to the most saturated colour sRGB can actually show.
    */
-  const brandC = a.brandChroma;
+  const brandC = achromatic ? 0 : a.brandChroma;
+  const neutralC = achromatic ? 0 : a.neutralChroma;
+  const variantC = achromatic ? 0 : a.variantChroma;
 
   const brand = (t) => ramp(hue, brandC, t);
-  const neutral = (t) => ramp(hue, a.neutralChroma, t);
-  const variant = (t) => ramp(hue, a.variantChroma, t);
+  const neutral = (t) => ramp(hue, neutralC, t);
+  const variant = (t) => ramp(hue, variantC, t);
 
   const notes = [];
+  if (achromatic) notes.push('the seed is black, white or grey, so the brand stays grey: give a coloured seed if the brand has a colour');
 
   /* 1. Backgrounds — unconstrained. */
   const bg1 = neutral(a.pageTone);
@@ -226,8 +233,8 @@ function buildPalette(seedHex, archetypeName) {
   /* 3. Text, solved against every background it lands on. */
   const onPage = [bg1, bg2, bg3, pg4].map((against) => ({ against, need: AA }));
 
-  const t1 = solveTone(hue, a.neutralChroma, 18, -1, onPage);
-  const t2 = solveTone(hue, a.neutralChroma, 42, -1, onPage);
+  const t1 = solveTone(hue, neutralC, 18, -1, onPage);
+  const t2 = solveTone(hue, neutralC, 42, -1, onPage);
   const t6 = solveTone(SALE_HUE, SALE_CHROMA, 46, -1, onPage);
 
   if (t6.moved > 0) {

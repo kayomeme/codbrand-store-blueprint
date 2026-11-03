@@ -120,6 +120,7 @@ The archetype list is deliberately dynamic (see `archetypes.md`). A blueprint th
 | key | holds |
 |---|---|
 | `brand_name` | the name as it should appear |
+| `purpose` | `store` (the default: it will sell) or `showcase` (built to be shown, not to sell yet — every page must read as a real store, so no visible placeholder; `SKILL.md` → "Asking") |
 | `niche` | what they sell, in their words |
 | `language` | `{ "code": "fr_FR", "script": "latin", "dialect": "Moroccan Darija" }` — see below |
 | `market` | ISO country, for currency and delivery conventions |

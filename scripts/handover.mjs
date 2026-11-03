@@ -5,6 +5,7 @@
  *   node handover.mjs <site-url> <api-key> [--wordmark-intended "why there is no logo image"]
  *                     [--block-kept <custom-block-id> "why this build did not write it"] …
  *                     [--floating-bar "why the merchant wants a header bar only as wide as its content"]
+ *                     [--utc-intended "why the store's customers keep UTC"]
  *
  * `preflight.mjs` asks whether a build can START. This asks whether it may END. It is the
  * UNCONDITIONAL gate: `match.mjs` only runs when the merchant named a reference site, which most of
@@ -18,8 +19,10 @@
  *
  * The failures it catches are the ones that survive a screenshot AND a `200`:
  *
- *   1. THE LOGO HALF-STATE. A logo is two writes — the header design's own fields, and `site_logo_id`
- *      on `stores`. Set one and the other renders nothing, with a 200 on both calls.
+ *   1. THE LOGO HALF-STATE. A logo is two writes for two things — the header design's own fields draw the
+ *      header, and `site_logo_id` on `stores` is the brand image search engines and shared links show (it
+ *      draws nothing in the header). A header image with no `site_logo_id` shares no picture; a text
+ *      wordmark must be declared, and still wants `site_logo_id` when pages have no image of their own.
  *
  *   2. THE HOLLOW ELEMENT. An element switched ON whose list is EMPTY. The view returns *before* it
  *      prints its own heading, so there is no dangling "Contact us", no error, and no gap in the
@@ -117,8 +120,34 @@
  *
  *  19. THE CLOCK NOBODY SET. Sale ends, countdowns and topbar dates are read in the site's time zone, and
  *      a fresh install keeps UTC whatever country the store sells in: a sale written to end at midnight
- *      ends hours off. A WARNING when the site runs on UTC or a fixed offset; only the build knows where
- *      the customers are.
+ *      ends hours off. A FAILURE when the site runs on UTC or a fixed offset while sales, countdowns or
+ *      dated topbar messages are on (`--utc-intended "<why>"` for customers who keep UTC), a WARNING
+ *      otherwise. A sale's dates are read in the site's own zone, never this machine's.
+ *
+ *  20. THE NOTE LEFT FOR THE MERCHANT. Words written to the merchant ("tell us why…", "replace before
+ *      launch") on a page, a block or a review; the placeholders the skill prescribes, listed for the
+ *      replace-list — and failed on a store whose blueprint records it as a SHOWCASE (see
+ *      scanShopperText()).
+ *
+ *  21. WHAT WORDPRESS LEFT, AND THE PAGE NOTHING LINKS TO. Its sample page and first post still published;
+ *      a store page no rendered link reaches (see checkLeftovers()).
+ *
+ *  22. THE POPUP WITH NO PANEL. A card design painting a popup's box transparent (see checkPopupPanels()).
+ *
+ *  23. THE CUSTOM CODE NOBODY REVIEWED. Every piece at every level, listed for review (see
+ *      listCustomCode()).
+ *
+ *  24. THE STOCK NOBODY COUNTS. Back-in-stock alerts, a stock badge or the low-stock line on, while no
+ *      product tracks its stock.
+ *
+ *  25. THE CRAMPED FILTER DRAWER. Over 24px of padding, or a close button under 44px (see
+ *      checkFilterDrawers()).
+ *
+ *  26. ONE CARD, SEVERAL LOOKS. Listing designs of one store drawing the same card differently, listed
+ *      for the merchant to confirm (see checkSameKindLooks()).
+ *
+ *  27. THE HOST'S BOT CHECK. Reads are paced; a challenge page the host answers instead of the store is
+ *      waited out, then reported as the host's, never as a missing permission.
  *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
@@ -160,6 +189,11 @@ const flagValues = new Set(flagAt === -1 ? [] : [flagAt + 1]);
 const floatAt = argv.findIndex((a) => a === '--floating-bar');
 const floatingReason = floatAt === -1 ? null : (argv[floatAt + 1] ?? '');
 if (floatAt !== -1) flagValues.add(floatAt + 1);
+/* `--utc-intended "<why>"`: the store's customers really keep UTC, so a site on UTC is right even with sales
+ * and countdowns on it. */
+const utcAt = argv.findIndex((a) => a === '--utc-intended');
+const utcReason = utcAt === -1 ? null : (argv[utcAt + 1] ?? '');
+if (utcAt !== -1) flagValues.add(utcAt + 1);
 argv.forEach((a, i) => {
   if (a !== '--block-kept') return;
   flagValues.add(i + 1).add(i + 2);
@@ -207,6 +241,23 @@ const MAX_PAGES = 100;
  * the read as failed. A read that still fails is then NOT CHECKED, never passed. */
 const MAX_RETRIES = 3;
 const MAX_WAIT_S = 30;
+
+/* Reads are PACED. A host's bot protection answers a burst with its own challenge page ("Checking your
+ * browser": an HTML 403 or 503 where the api answers JSON) instead of the store — measured on two hosted
+ * stores, 16-10-2026, after one unpaced run of a copy of this script. A short pause between reads keeps a
+ * run under it; a challenge that still comes is waited out a few times, then counted and reported as the
+ * HOST's refusal — never as the store's, and never as a missing permission. */
+const PACE_MS = 150;
+let nextRead = 0;
+async function pace() {
+  const now = Date.now();
+  const at = Math.max(now, nextRead);
+  nextRead = at + PACE_MS;
+  if (at > now) await new Promise((r) => setTimeout(r, at - now));
+}
+const hostChallenge = { count: 0, paths: [] };
+const isChallenge = (status, text) => (status === 403 || status === 503)
+  && /checking your browser|just a moment|cf-chl|captcha|challenge-platform|attention required/i.test(text);
 
 /* The plugin version from which a header's sticky style outranks its card design. Before it the two
  * tied at (0,2,0), and the card design — compiled later — won every property it declared. */
@@ -593,6 +644,7 @@ async function checkImages(call, R, productsRead) {
     const mime = m.mime || 'unknown';
     mimes.set(mime, (mimes.get(mime) ?? 0) + 1);
     try {
+      await pace();
       const r = await fetch(m.url, { headers: { Range: `bytes=0-${HEADER_BYTES - 1}` } });
       const dim = r.ok ? readImageSize(new Uint8Array(await r.arrayBuffer())) : null;
       if (dim && dim.w > 0 && dim.h > 0) { sizes.push({ id, w: dim.w, h: dim.h, name: m.filename || id }); }
@@ -793,10 +845,16 @@ function presetAt(preset) {
  * stored, compiled and never seen: a 200 and no visible change. Measured on one build: a topbar given
  * its colour through the style stayed invisible until the colour went into a preset.
  *
- * A WARNING, never a failure — "usually": a selector holding an id outranks the preset (skipped, as the
- * plugin skips it), an !important style beats a normal preset, and an equally specific preset can
- * lose. Only properties set to DIFFERENT values are reported; padding and background are compared as
- * longhands, every other property as written. A preset on a parent or child element is not checked.
+ * A WARNING, never a failure — "usually": a style compiled under a selector holding an id outranks the
+ * preset (skipped), an !important style beats a normal preset, and an equally specific preset can lose.
+ * The id is looked for in the selector the design's CSS really PRINTS the style under — its
+ * `compiled_selector` (plugin 1.2.1519+), not its `css_selector`, which names the element and can weigh
+ * differently (/docs/settings_vs_presets): measured on one store, 70 style keys named with one weight and
+ * compiled with another, a product description's `#cl_long_description …` among them, compiled as
+ * `.cl_long_description …` and outweighed by its preset. An older plugin reports no `compiled_selector`, and
+ * then the name decides, as before. Only properties set to DIFFERENT values are reported; padding and
+ * background are compared as longhands, every other property as written. A preset on a parent or child
+ * element is not checked.
  */
 function checkStyleVsPreset(designs, presetsById) {
   const notes = [];
@@ -805,8 +863,9 @@ function checkStyleVsPreset(designs, presetsById) {
     const sg = d.styleGen ?? {};
     for (const [key, css] of Object.entries(d.settings)) {
       if (!key.endsWith('_style') || typeof css !== 'string' || !css.trim()) continue;
+      // `sel` pairs the style with its preset (the element's shared name); the weight is the compiled one.
       const sel = sg[key]?.css_selector;
-      if (!sel || sel.includes('#')) continue;
+      if (!sel || String(sg[key]?.compiled_selector ?? sel).includes('#')) continue;
       const style = cascade(new Map(), css);
       for (const [pKey, pId] of Object.entries(d.settings)) {
         /* `*_countdown_preset` holds a countdown DESIGN id, not a preset (/docs/settings_vs_presets). */
@@ -1646,17 +1705,31 @@ function checkWhatsappButton(designs) {
  */
 async function checkPublicHome(siteUrl) {
   try {
+    await pace();
     const res = await fetch(`${siteUrl}/`, { redirect: 'follow', headers: { Accept: 'text/html' } });
     const html = await res.text();
     const title = ((html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] ?? '').trim();
     return {
       status: res.status,
       title,
+      html,
       store: /\/plugins\/(codbrand-plugin|cod-leads-for-elementor)\/|cl_ajax_nonce/.test(html),
     };
   } catch (err) {
     return { error: err.message };
   }
+}
+
+/**
+ * Does the theme render Block spacing (`blockGap`)? Read from the page, never assumed from the theme's name
+ * (`codbrand-content-builder` → references/snippets.md → "Detect it"). WordPress prints the flow-layout
+ * spacing rule — `:where(.is-layout-flow) > *{margin-block-start:…}` — only when the theme supports it;
+ * without support it emits the flex and grid fallback gap alone (wp-includes/class-wp-theme-json.php,
+ * get_layout_styles()). true / false from the home page's own styles; null when the page could not be read.
+ */
+function blockGapFrom(html) {
+  if (typeof html !== 'string' || !html) return null;
+  return /:where\(\.is-layout-(?:flow|constrained)\)\s*>\s*\*\s*\{[^}]*margin-block-start/.test(html);
 }
 
 const yes = (v) => String(v ?? '') === 'yes';
@@ -1772,6 +1845,10 @@ const FEATURES = {
   stock_waitlist: {
     label: 'Back-in-stock alerts',
     state: (c) => combine([probe(c, 'product', 'stock_waitlist_is_active')]),
+    /* The alert shows only on a product that counts its stock and has run out of it. */
+    rows: { products: tracksStock, what: 'products that track stock', gates: true,
+            empty: 'so the alert shows on no product: it appears only where a product counts its stock and sells out. ' +
+                   'Turn stock tracking on (`stock_mode`) for the products the merchant counts' },
   },
   countdown: {
     label: 'Countdown timer',
@@ -2009,6 +2086,12 @@ function storeTime(text, clock = {}) {
   return Date.parse(s);
 }
 
+/** A product that counts its stock (`stock_mode` `product` or `variant`): the only kind a stock badge, the
+ *  low-stock line or a back-in-stock alert can show on. */
+function tracksStock(p) {
+  return String(p.stock_mode ?? 'off') !== 'off';
+}
+
 /** A product the countdown can render on: a sale price, with a start date and an end date still ahead. */
 function onTimedSale(p, clock) {
   if (!(Number(p.sale_price) > 0) || String(p.sale_from ?? '').trim() === '') return false;
@@ -2185,9 +2268,9 @@ const clip = (s, n) => { const t = String(s).replace(/\s+/g, ' ').trim(); return
  * `custom_block`), or a product's `extra_description_block_id`. A block shown nowhere is skipped: the
  * shopper never sees it. A block kept with `--block-kept` is not validated — it is not this build's.
  */
-async function checkCustomBlocks(call, R, store, productsRead, kept) {
+async function checkCustomBlocks(call, R, store, productsRead, kept, blockGap = null) {
   const read = await walk(call, pathFor('custom_blocks', 'custom_blocks', R));
-  if (read.error) return { skipped: `could not read the custom blocks — ${read.error}` };
+  if (read.error) return { skipped: `could not read the custom blocks — ${read.error}`, rows: [] };
   const byId = new Map(read.rows.map((b) => [Number(b.id), b]));
 
   const where = new Map();
@@ -2216,7 +2299,8 @@ async function checkCustomBlocks(call, R, store, productsRead, kept) {
   }
 
   const out = { shown: where.size, deferred, missing: [], failing: [], warned: [], unreadable: [], kept: [], shortReason: [],
-    keptNotShown: [...kept.keys()].filter((id) => !where.has(Number(id))), productsUnread: !!productsRead.error, checked: 0 };
+    keptNotShown: [...kept.keys()].filter((id) => !where.has(Number(id))), productsUnread: !!productsRead.error, checked: 0,
+    rows: read.rows.filter((b) => where.has(Number(b.id))), blockGap };
   const toValidate = [];
   for (const [id, places] of where) {
     const block = byId.get(id);
@@ -2238,7 +2322,10 @@ async function checkCustomBlocks(call, R, store, productsRead, kept) {
     for (const { block, places } of toValidate) {
       const file = join(dir, `custom-block-${block.id}.html`);
       writeFileSync(file, String(block.content ?? ''));
-      const run = spawnSync(process.execPath, [validator.script, file], { encoding: 'utf8', timeout: 60000 });
+      // Block spacing read from the home page (blockGapFrom()): with support there, the validator's
+      // "confirm it" warning has nothing left to ask.
+      const args = [validator.script, file, ...(blockGap === true ? ['--block-gap=supported'] : [])];
+      const run = spawnSync(process.execPath, args, { encoding: 'utf8', timeout: 60000 });
       let report = null;
       try { report = JSON.parse(run.stdout); } catch { /* no report: said below */ }
       if (!report || !Array.isArray(report.errors)) {
@@ -2256,21 +2343,328 @@ async function checkCustomBlocks(call, R, store, productsRead, kept) {
   return out;
 }
 
+/* ── 20 · words a shopper reads that were written for the merchant ─────────────────────────────────────
+ * Notes to the merchant belong in the hand-over and its replace-list, never on a page ("Tell us why you
+ * started the brand…", "Send us the real ones…"): measured on one store, six pages and thirty reviews
+ * carried them, and every check passed. The placeholders this skill prescribes are a different thing — a
+ * merchant's own build shows them on purpose (SKILL.md → "Asking") — but a SHOWCASE store, recorded as one in
+ * its blueprint (`purpose`), must read as a real store, so there they fail. */
+
+/* The placeholders the skill itself writes: a contact number whose digits are X ("+212 6XX XXX XXX"), an address
+ * at "yourstore". Written the same way in every language, so they are found in any. A number needs four X or more
+ * and no letter after them: a size table's "36 XXL" is not one (measured on one store's size guide). */
+const PLACEHOLDER_MARKS = [
+  (t) => {
+    for (const m of t.matchAll(/[+\d][\d\s.()-]*X[X\d\s.()-]*/g)) {
+      const s = m[0].replace(/[\s.()-]+$/, '');
+      if ((s.match(/X/g) || []).length >= 4 && /\d/.test(s) && !/[A-Za-z]/.test(t[m.index + s.length] ?? '')) return s;
+    }
+    return undefined;
+  },
+  (t) => (t.match(/yourstore/i) || [])[0],
+];
+/* Words that mark a placeholder the merchant was meant to SEE — the unverified legal draft, a sample review.
+ * English, French and Arabic, the languages this skill's stores are most often written in. */
+const PLACEHOLDER_WORDS = ['unverified draft', 'to be completed', 'sample review', 'lorem ipsum',
+  'brouillon non vérifié', 'à compléter', "avis d'exemple", 'مسودة', 'نص مؤقت'];
+/* Words written TO the merchant: a request a shopper must never read. A heuristic, so a warning. */
+const MERCHANT_NOTE_WORDS = ['placeholder', 'before launch', 'generic draft', 'confirm or correct', 'not yours yet',
+  'in your words', 'send us the real', 'tell us why', 'replace with a real', 'espace réservé', 'avant le lancement',
+  'dites-nous pourquoi', 'envoyez-nous les vrais', 'قبل الإطلاق'];
+
+/** The words of markup as a shopper reads them: no tags, no block comments, the common entities decoded. */
+function readableText(html) {
+  return String(html ?? '').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;|&#160;/g, ' ').replace(/&amp;/g, '&').replace(/&#0?39;|&apos;|&rsquo;/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+/** Every place a shopper reads that still carries a placeholder or a note to the merchant. */
+function scanShopperText(sources) {
+  const placeholders = new Map();
+  const notes = new Map();
+  const hit = (map, where, what) => { if (!map.has(where)) map.set(where, new Set()); map.get(where).add(what); };
+  for (const { where, text } of sources) {
+    const t = readableText(text);
+    if (!t) continue;
+    const lower = t.toLowerCase();
+    for (const mark of PLACEHOLDER_MARKS) { const m = mark(t); if (m) hit(placeholders, where, `"${clip(m.trim(), 30)}"`); }
+    for (const w of PLACEHOLDER_WORDS) if (lower.includes(w)) hit(placeholders, where, `"${w}"`);
+    for (const w of MERCHANT_NOTE_WORDS) if (lower.includes(w)) hit(notes, where, `"${w}"`);
+  }
+  return { placeholders, notes };
+}
+
+/** Every string a design shows, collected from its settings — repeater rows included. */
+function designStrings(value, out = []) {
+  if (typeof value === 'string') out.push(value);
+  else if (Array.isArray(value)) value.forEach((v) => designStrings(v, out));
+  else if (value && typeof value === 'object') Object.values(value).forEach((v) => designStrings(v, out));
+  return out;
+}
+
+/* ── 21 · what WordPress left, and the store page nothing links to ─────────────────────────────────────
+ * WordPress's own sample page and first post stay published until someone removes them, and a store page
+ * no menu, footer or page links to is a page no shopper finds. Measured on one store: the sample page (with
+ * a link into wp-admin) and "Hello world!" published; the order-tracking and reviews pages linked from
+ * nowhere. Links are read from the RENDERED pages, as a visitor follows them, so a link a design or a
+ * plugin block draws counts. */
+async function checkLeftovers(call, R, store, pagesRead, siteUrl, publicHome) {
+  const problems = [];
+  const notes = [];
+  if (pagesRead.error) return { problems, notes: [`WordPress's sample content and unlinked pages were NOT checked — ${pagesRead.error}.`] };
+  const published = pagesRead.rows.filter((p) => String(p.status ?? 'publish') === 'publish');
+  const leftovers = published.filter((p) => p.slug === 'sample-page').map((p) => `the page "${clip(p.title ?? '', 40)}" (/${p.slug}/)`);
+  const posts = await walk(call, pathFor('posts', 'posts', R));
+  if (!posts.error) {
+    leftovers.push(...posts.rows.filter((p) => p.slug === 'hello-world' && String(p.status ?? 'publish') === 'publish')
+      .map((p) => `the post "${clip(p.title ?? '', 40)}" (/${p.slug}/)`));
+  }
+  if (leftovers.length) {
+    problems.push(`WordPress's sample content is still published: ${leftovers.join(', ')}. A shopper can land on it, and the\n` +
+      '      sample page links into wp-admin. Take it off the site through the pages and posts doors.');
+  }
+  if (!publicHome.store) {
+    notes.push('pages that no link reaches were NOT looked for: the home page did not show the store to a logged-out visitor.');
+    return { problems, notes };
+  }
+  /* The store's own links, whatever host spelling they carry: the address this run was given, and the one the
+   * pages door reports (they differ behind a proxy, and between www and no www). */
+  const hostOf = (url) => { try { return new URL(url, `${siteUrl}/`).host.replace(/^www\./, ''); } catch { return null; } };
+  const hosts = new Set([hostOf(siteUrl), ...published.map((p) => p.url && hostOf(p.url))].filter(Boolean));
+  const pathOf = (url) => { try { return new URL(url, `${siteUrl}/`).pathname.replace(/\/+$/, '') || '/'; } catch { return null; } };
+  /* Only a link a shopper can follow (`<a href>`) and only to ANOTHER page: every page names itself in its own
+   * head (canonical, shortlink), which on one store made every page look linked. */
+  const linked = new Set();
+  const collect = (html, self) => {
+    for (const m of String(html).matchAll(/<a\b[^>]*?\bhref=["']([^"'#\s]+)/gi)) {
+      const path = pathOf(m[1]);
+      if (hosts.has(hostOf(m[1])) && path !== self) linked.add(path);
+    }
+  };
+  collect(publicHome.html, '/');
+  for (const p of published) {
+    const path = pathOf(p.url ?? `/${p.slug}/`);
+    if (!path) continue;
+    try {
+      await pace();
+      const res = await fetch(`${siteUrl}${path}/`, { redirect: 'follow', headers: { Accept: 'text/html' } });
+      collect(await res.text(), path);
+    } catch { /* an unreadable page adds no link */ }
+  }
+  /* The pages a shopper reaches by acting, not by a link: the cart, the checkout, the thank-you page, search. */
+  const reached = new Set(['cart_page_id', 'checkout_page_id', 'thankyou_page_id', 'search_page_id'].map((k) => Number(store?.[k])).filter((n) => n > 0));
+  const front = (p) => p.is_front_page === true || String(p.is_front_page) === 'yes';
+  const unlinked = published.filter((p) => !reached.has(Number(p.id)) && !front(p) && !linked.has(pathOf(p.url ?? `/${p.slug}/`)));
+  if (unlinked.length) {
+    notes.push(`${unlinked.length} published page(s) no menu, footer or page links to, so no shopper finds them: ` +
+      unlinked.slice(0, 10).map((p) => `"${clip(p.title ?? '', 30)}" (/${p.slug}/)`).join(', ') + (unlinked.length > 10 ? ', …' : '') + '.\n' +
+      '    Link each from a menu or the footer, or take it off the site when it is not meant for shoppers.');
+  }
+  return { problems, notes };
+}
+
+/* ── 22 · the popup with no panel ──────────────────────────────────────────────────────────────────────
+ * A popup's box is `.cl_modal_container`, white unless a card design or style on it says otherwise. A card
+ * design that paints it transparent leaves the popup's text straight on the page behind — measured on one
+ * store, a thank-you upsell shown as a modal over the order lines. Read from each design's own
+ * style_generator: any card design or style whose selector reaches the popup's box, on a design whose
+ * matching `*_display_type` (when it has one) shows that popup. */
+function checkPopupPanels(designs, presetsById, resolve) {
+  const problems = [];
+  for (const d of designs) {
+    for (const [key, cfg] of Object.entries(d.styleGen ?? {})) {
+      if (!String(cfg?.css_selector ?? '').includes('.cl_modal_container')) continue;
+      const prefix = key.replace(/_(container_)?(preset|style)$/, '');
+      const display = d.settings[`${prefix}_display_type`];
+      if (display !== undefined && !/modal/.test(String(display))) continue;
+      const active = d.settings[`${prefix}_is_active`];
+      if (active !== undefined && !yes(active)) continue;
+      let maps = [];
+      let what = `\`${key}\``;
+      if (key.endsWith('_preset')) {
+        const preset = presetsById.get(String(d.settings[key]));
+        const at = presetAt(preset);
+        if (at) { maps = [at.desktop, at.phone]; what = `\`${key}\` (card design #${preset.id} "${clip(preset.title ?? '', 30)}")`; }
+      } else if (key.endsWith('_style')) {
+        maps = [cascade(new Map(), d.settings[key])];
+      }
+      if (!maps.some((m) => m.has('background-color') && paintOf(m, resolve).none)) continue;
+      problems.push(`${d.label}: the popup ${display !== undefined ? `\`${prefix}_display_type\` = \`${display}\` ` : ''}opens with no panel — ` +
+        `${what} paints its box\n      transparent, so its text sits straight on the page behind it. Give that card design a ` +
+        'background (clone it first when other\n      surfaces use it), or point the key at one that has.');
+    }
+  }
+  return problems;
+}
+
+/* ── 23 · the custom code nobody reviewed ──────────────────────────────────────────────────────────────
+ * Custom CSS and JS at any level — the store, a design, a page, a product — is the last door, and the one
+ * no other check reads. Measured on one store: a third of its custom rules did nothing (CSS aimed inside a
+ * design nested in another stops at its edge), a few repeated a setting, two broke the layout between
+ * phone and desktop widths, and a custom-JS sort reordered only the cards already loaded. Listed here so
+ * each piece is reviewed; whether a rule applies is measured in the browser (joins.js → dead-scoped-css). */
+function listCustomCode(store, designs, pagesRead, productsRead) {
+  const pieces = [];
+  let readable = false;
+  const lines = (s) => String(s).split('\n').filter((l) => l.trim()).length;
+  const add = (where, css, js) => {
+    if (css === undefined && js === undefined) return;
+    readable = true;
+    const parts = [];
+    if (String(css ?? '').trim()) parts.push(`CSS ${lines(css)} line(s)`);
+    if (String(js ?? '').trim()) parts.push(`JS ${lines(js)} line(s)`);
+    if (parts.length) pieces.push(`${where}: ${parts.join(', ')}`);
+  };
+  add('the store', store?.custom_css, store?.custom_js);
+  for (const d of designs) add(`design ${d.label}`, d.custom?.css, d.custom?.js);
+  for (const p of pagesRead.rows ?? []) if (String(p.status ?? 'publish') === 'publish') add(`page "${clip(p.title ?? '', 30)}"`, p.custom_css, p.custom_js);
+  for (const p of productsRead.rows ?? []) add(`product "${clip(p.title ?? '', 30)}"`, p.custom_css, p.custom_js);
+  return { readable, pieces };
+}
+
+/* ── 25 · the cramped filter drawer ────────────────────────────────────────────────────────────────────
+ * On a phone the filter opens as a drawer (`filter_layout` / `filter_mobile_layout` `modal_left` or
+ * `modal_right`). Its padding is its own `filter_drawer_style` side by side, else its card design's and
+ * `filter_container_style`'s; its close button is an icon design. Measured on one store: a card made for page
+ * gutters on the drawer (no room above, 48px each side) and a close × of 16 × 22. Above 24px of padding the
+ * drawer gives the filters' room away; under 44px the close button is smaller than a thumb. */
+const pxOf = (v) => {
+  const m = String(v ?? '').trim().match(/^(-?\d+(?:\.\d+)?)(px|r?em)?$/);
+  return m ? Number(m[1]) * (m[2] && m[2] !== 'px' ? 16 : 1) : NaN;
+};
+function checkFilterDrawers(designs, presetsById) {
+  const notes = [];
+  for (const d of designs) {
+    const s = d.settings;
+    if (!('filter_drawer_style' in s) || ('filter_is_active' in s && !yes(s.filter_is_active))) continue;
+    /* A drawer on computers (`filter_layout`), on phones (`filter_mobile_layout`), or both: each is judged with
+     * its own breakpoint's values — a card can pad 48px on desktop and 20px on phones. */
+    const where = [['computers', 'desktop', 'filter_layout'], ['phones', 'phone', 'filter_mobile_layout']]
+      .filter(([, , k]) => /^modal_/.test(String(s[k] ?? '')));
+    if (!where.length) continue;
+    const own = cascade(new Map(), s.filter_drawer_style);
+    const card = presetAt(presetsById.get(String(s.filter_container_preset)));
+    const wide = [];
+    for (const [bp, map] of where) {
+      const base = cascade(new Map(card?.[map] ?? []), s.filter_container_style);
+      const side = (p) => pxOf(own.get(p)?.value ?? base.get(p)?.value ?? '0');
+      for (const p of ['padding-top', 'padding-left', 'padding-right']) if (side(p) > 24) wide.push(`${p} ${side(p)}px on ${bp}`);
+    }
+    const close = presetsById.get(String(s.filter_drawer_close_preset));
+    const at = presetAt(close);
+    const atMap = at?.[where.some(([, m]) => m === 'phone') ? 'phone' : 'desktop'];
+    const size = (p) => pxOf(atMap?.get(`min-${p}`)?.value ?? atMap?.get(p)?.value);
+    const small = close && !(size('width') >= 44 && size('height') >= 44);
+    if (!wide.length && !small) continue;
+    const said = [];
+    if (wide.length) said.push(`pads its content ${wide.join(', ')} — over 24px, room taken from the filters`);
+    if (small) said.push(`closes with icon design #${close.id} "${clip(close.title ?? '', 30)}", which ` +
+      (Number.isNaN(size('width')) && Number.isNaN(size('height')) ? 'sets no size, so the button is only as big as its icon'
+        : `is ${Number.isNaN(size('width')) ? '?' : size('width')} × ${Number.isNaN(size('height')) ? '?' : size('height')}px`) + ' — under the 44 × 44 a thumb needs');
+    notes.push(`${d.label}: the filter drawer ${said.join('; and it ')}. Pad the drawer through \`filter_drawer_style\`\n` +
+      '    and give its close button an icon design of 44px or more (/docs/plist1_global_settings → "The drawer").');
+  }
+  return notes;
+}
+
+/* ── 26 · one card, several looks ──────────────────────────────────────────────────────────────────────
+ * A store can show product cards through several listing designs — the shop, the category pages, a row on
+ * the home page, a recommended row — and each is styled on its own. Measured on one store: tags top-left on
+ * three listings and top-right on the home page's, and titles in small capitals on one row only. The designs
+ * found: the store's own, a category page's `design_template`, and those a page or a shown custom block
+ * names (`"instanceId"` of a `cl/plist1` block, `id` of a `[cl_plist1]` shortcode). Differences are listed for
+ * the merchant to confirm, never failed: a different look can be meant. */
+const LOOK_KEYS = {
+  plist1: ['product_tags_photo_position', 'discount_photo_position', 'stock_badge_photo_position', 'product_title_preset',
+    'regular_price_text_preset', 'sale_price_text_preset', 'single_product_preset', 'product_image_container_style'],
+};
+/**
+ * The list designs a store shows beyond the ones its row points at: a category page's `design_template`
+ * (products), a product page's `reviews_design_template` (reviews), and those a published page or a shown
+ * custom block names — the `"instanceId"` of a `cl/<type>` block, the `id` of a `[cl_<type>]` shortcode. Read
+ * once, for the checks that judge every list a shopper meets. A name that reads nothing is skipped here: the
+ * card-gap check reports a template that points at no design.
+ */
+async function shownListDesigns(call, R, designs, pagesRead, blockRows) {
+  const gsPath = pathFor('section_manager_global_settings', 'section_manager/global_settings', R);
+  const wanted = new Map();
+  const add = (type, id) => {
+    if (id > 0 && !designs.some((d) => d.type === type && Number(d.id) === id)) wanted.set(`${type}/${id}`, [type, id]);
+  };
+  for (const d of designs) {
+    if (d.type === 'category') add('plist1', Number(d.settings.design_template));
+    if (d.type === 'product') add('reviewlist', Number(d.settings.reviews_design_template));
+  }
+  const texts = [...(pagesRead.rows ?? []).filter((p) => String(p.status ?? 'publish') === 'publish').map((p) => p.content),
+    ...blockRows.map((b) => b.content)];
+  for (const type of ['plist1', 'catlist', 'reviewlist']) {
+    for (const t of texts) {
+      for (const m of String(t ?? '').matchAll(new RegExp(`wp:cl/${type}\\s+(\\{[^}]*\\})`, 'g'))) {
+        try { add(type, Number(JSON.parse(m[1]).instanceId)); } catch { /* not JSON */ }
+      }
+      for (const m of String(t ?? '').matchAll(new RegExp(`\\[cl_${type}\\b[^\\]]*?\\bid=["']?(\\d+)`, 'g'))) add(type, Number(m[1]));
+    }
+  }
+  const out = [];
+  for (const [label, [type, id]] of wanted) {
+    const res = await call(`${gsPath}/${type}/${id}`);
+    const settings = res.body?.settings ?? res.body?.data?.settings;
+    if (res.status === 200 && settings && typeof settings === 'object') out.push({ label, type, id, settings });
+  }
+  return out;
+}
+
+function checkSameKindLooks(listDesigns) {
+  const notes = [];
+  const ratio = (style) => (String(style ?? '').match(/aspect-ratio\s*:\s*([^;]+)/) || [])[1]?.trim() ?? '';
+  for (const [type, keys] of Object.entries(LOOK_KEYS)) {
+    const looks = listDesigns.filter((d) => d.type === type);
+    if (looks.length < 2) continue;
+    const diffs = [];
+    for (const k of keys) {
+      const vals = looks.map((d) => [d.label, k.endsWith('_container_style') ? ratio(d.settings[k]) : d.settings[k]])
+        .filter(([, v]) => v !== undefined && String(v) !== '');
+      if (new Set(vals.map(([, v]) => String(v))).size > 1) {
+        diffs.push(`${k.endsWith('_container_style') ? 'the photo ratio' : `\`${k}\``}: ${vals.map(([l, v]) => `${l} ${v}`).join(' · ')}`);
+      }
+    }
+    if (diffs.length) {
+      notes.push(`${looks.length} ${type} designs show cards on this store, and they draw them differently:\n` +
+        diffs.map((x) => `        ${x}`).join('\n') + '\n' +
+        '    The same card on two pages should look the same. Match them, or confirm each difference with the merchant.');
+    }
+  }
+  return notes;
+}
+
 async function main(base) {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const call = async (path) => {
     for (let attempt = 0; ; attempt++) {
+      await pace();
       const res = await fetch(`${base}/${path}`, {
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
       });
+      const text = await res.text();
       let body = null;
-      try { body = await res.json(); } catch { /* status still tells us what happened */ }
+      try { body = JSON.parse(text); } catch { /* status still tells us what happened */ }
       if (res.status === 429 && attempt < MAX_RETRIES) {
         const asked = Number(res.headers.get('retry-after')) || Number(body?.data?.retry_after) || 2;
         const wait = Math.min(MAX_WAIT_S, Math.max(1, asked));
         console.log(`  · rate-limited on ${path.split('?')[0]} — waiting ${wait}s, as the api asked`);
         await sleep(wait * 1000);
         continue;
+      }
+      if (!body && isChallenge(res.status, text)) {
+        // Once the host has held out through the retries, later reads are counted at once, not waited on.
+        if (attempt < MAX_RETRIES && !hostChallenge.count) {
+          const wait = 20 * (attempt + 1);
+          console.log(`  · the host's bot check answered ${path.split('?')[0]} instead of the store — waiting ${wait}s`);
+          await sleep(wait * 1000);
+          continue;
+        }
+        hostChallenge.count++;
+        if (hostChallenge.paths.length < 5) hostChallenge.paths.push(path.split('?')[0]);
       }
       return { status: res.status, body, headers: res.headers };
     }
@@ -2316,7 +2710,9 @@ async function main(base) {
     if (!settings || typeof settings !== 'object') { unreadable.push(`${type}/${id} (no settings)`); continue; }
     const schema = res.body?.settings_schema ?? res.body?.data?.settings_schema ?? {};
     const styleGen = res.body?.style_generator ?? res.body?.data?.style_generator ?? {};
-    designs.push({ label: `${type}/${id}`, type, id, settings, schema, styleGen });
+    const top = res.body?.data ?? res.body ?? {};
+    /* A key without the custom-code access gets these fields dropped, not emptied: undefined = unread. */
+    designs.push({ label: `${type}/${id}`, type, id, settings, schema, styleGen, custom: { css: top.custom_css, js: top.custom_js } });
 
     for (const h of hollowIn(settings)) {
       hollow++;
@@ -2399,6 +2795,8 @@ async function main(base) {
 
   /* ── the catalogue's photography ─────────────────────────────────────────────── */
   const productsRead = await walk(call, pathFor('products', 'products', R));
+  /* The store's pages, read once: their images, their words, their links and their custom code are checked below. */
+  const pagesRead = await walk(call, pathFor('pages', 'pages', R));
   const imgs = await checkImages(call, R, productsRead);
   if (imgs.skipped) {
     line(false, `${imgs.skipped} — images NOT checked, and not passed`);
@@ -2416,8 +2814,14 @@ async function main(base) {
     }
   }
 
+  /* The home page as a logged-out visitor gets it — read once, here: the custom blocks below need what its
+   * styles say about Block spacing, and the public-store check near the end reports the rest. */
+  const siteUrl = base.replace(/\/wp-json\/cl-api\/v1$/, '');
+  const publicHome = await checkPublicHome(siteUrl);
+  const blockGap = publicHome.store ? blockGapFrom(publicHome.html) : null;
+
   /* ── custom blocks: content, checked like a page — WordPress accepts anything in a Custom HTML block ── */
-  const cb = await checkCustomBlocks(call, R, store, productsRead, keptBlocks);
+  const cb = await checkCustomBlocks(call, R, store, productsRead, keptBlocks, blockGap);
   const blockLabel = (b) => `custom block #${b.id} "${clip(b.title ?? '', 40)}"`;
   if (cb.skipped) {
     line(false, `${cb.skipped} — custom blocks NOT checked, and not passed`);
@@ -2469,7 +2873,12 @@ async function main(base) {
     }
   }
 
-  /* ── the logo, which is two writes and fails silently when it is one ─────────────────────────── */
+  /* ── the logo: the header's image, and the brand image the store shares ───────────────────────────
+   * Two different writes for two different things: the header design's logo fields draw the header;
+   * `site_logo_id` is the brand image search engines read as the Organization logo and every page with no
+   * image of its own shares as its picture (og:image) — it draws nothing in the header (/docs/stores). So a
+   * text wordmark still wants `site_logo_id`: measured on one store, a link to its home page sent on WhatsApp
+   * showed no picture, because only its product pages had an image to share. */
   const siteLogo = isSet(store?.site_logo_id);
   let designLogo = false;
   const designLogoIn = [];
@@ -2478,35 +2887,50 @@ async function main(base) {
       if (/logo/.test(k) && /(_url|_id)$/.test(k) && isSet(v)) { designLogo = true; designLogoIn.push(`${design}.${k}`); }
     }
   }
+  const wordmarkDeclared = String(wordmarkReason ?? '').trim().length >= MIN_REASON;
+  /* Pages a shopper shares: not the cart, the checkout, the thank-you page or search, which nobody sends anyone. */
+  const flowPages = new Set(['cart_page_id', 'checkout_page_id', 'thankyou_page_id', 'search_page_id'].map((k) => Number(store?.[k])).filter((n) => n > 0));
+  const imageless = (pagesRead.rows ?? []).filter((p) => String(p.status ?? 'publish') === 'publish' && !flowPages.has(Number(p.id))
+    && !(Number(p.featured_image_id) > 0));
+  /* The header is judged by the header designs alone: a footer's or a popup's logo image does not draw it. */
+  const headerLogoIn = designLogoIn.filter((x) => x.startsWith('header/'));
 
-  if (siteLogo && designLogo) {
-    line(true, 'logo set in both places');
+  if (designLogo && headerLogoIn.length && siteLogo) {
+    line(true, 'the header shows the logo image, and `site_logo_id` gives the store its brand image');
     passed.push('the logo is whole');
-  } else if (!siteLogo && !designLogo) {
-    /* A genuine decision — some brands are a wordmark. It still has to be a DECISION. */
-    if (String(wordmarkReason ?? '').trim().length >= MIN_REASON) {
-      line(true, `no logo image, declared intentional: "${String(wordmarkReason).trim()}"`);
+  } else if (headerLogoIn.length) {
+    problems.push(
+      `the header shows a logo image (${headerLogoIn.join(', ')}), but \`site_logo_id\` on \`stores\` is NOT SET: search\n` +
+      '      engines get no Organization logo, and every page with no image of its own is shared with no picture.\n' +
+      '      Point `site_logo_id` at the brand image (square shares best) — it does not change the header.\n' +
+      '      See api-recipes.md → "The header".'
+    );
+  } else {
+    /* A text wordmark in the header. A genuine decision — some brands are a wordmark. It still has to be a DECISION. */
+    if (wordmarkDeclared) {
+      line(true, `no logo image in the header, declared intentional: "${String(wordmarkReason).trim()}"`);
       console.log('    → then the wordmark is the brand mark. Its typography is the header design\'s');
       console.log('      `logo_text_preset` (a typography preset, default 204 "Small Title"): pick or');
       console.log('      clone one through design_controls/presets. See api-recipes.md → "The header".');
       passed.push('the wordmark is a declared decision');
     } else {
       problems.push(
-        'no logo anywhere — neither `site_logo_id` nor any design\'s logo field is set.\n' +
-        '      The header falls back to a text wordmark. That is a legitimate choice and NOT a\n' +
-        '      legitimate accident, so say which it is:\n' +
+        'no header design has a logo image, so the header shows the store\'s name as text. That is a legitimate\n' +
+        '      choice and NOT a legitimate accident, so say which it is:\n' +
         `        --wordmark-intended "<why, at least ${MIN_REASON} characters>"`
       );
     }
-  } else {
-    /* Half-set. No typed reason clears this one: it is not a decision anyone would make on purpose. */
-    problems.push(
-      'LOGO HALF-STATE — set in one place and not the other, so one of them renders nothing:\n' +
-      `        site_logo_id (on \`stores\`) : ${siteLogo ? 'set' : 'NOT SET'}\n` +
-      `        the design's logo fields   : ${designLogo ? `set (${designLogoIn.join(', ')})` : 'NOT SET'}\n` +
-      '      A logo is two writes. `--wordmark-intended` does not excuse this — it covers having no\n' +
-      '      logo at all, not having half of one. See api-recipes.md → "The header".'
-    );
+    if (!siteLogo && imageless.length) {
+      problems.push(
+        `\`site_logo_id\` on \`stores\` is NOT SET, and ${imageless.length} published page(s) have no image of their own ` +
+        `(${imageless.slice(0, 4).map((p) => `/${p.slug}/`).join(', ')}${imageless.length > 4 ? ', …' : ''}):\n` +
+        '      shared on WhatsApp or Instagram they show no picture, and search engines get no Organization logo.\n' +
+        '      A text wordmark still wants a brand image there — it draws nothing in the header. Upload one (square\n' +
+        '      shares best) and point `site_logo_id` at it. See api-recipes.md → "The header".'
+      );
+    } else if (siteLogo) {
+      line(true, '`site_logo_id` gives the store a brand image to share, beside the text wordmark');
+    }
   }
 
   /* ── the card designs: the header's height and stuck state, and every coloured band ─────────── */
@@ -2561,6 +2985,14 @@ async function main(base) {
       line(true, `the cards of every list keep a space between them (${gaps.checked} list design use(s) checked)`);
       passed.push('cards in a list do not touch');
     }
+
+    const panels = checkPopupPanels(designs, presetsById, resolve);
+    problems.push(...panels);
+    /* Every list design a shopper meets — the store's own and those a page or a template names — for the drawer
+     * and card-look checks. Measured: the cramped drawer was on a listing reached only through the category page. */
+    const listDesigns = [...designs, ...await shownListDesigns(call, R, designs, pagesRead, cb.rows ?? [])];
+    notes.push(...checkFilterDrawers(listDesigns, presetsById));
+    notes.push(...checkSameKindLooks(listDesigns));
   }
 
   /* ── shopper copy still in Latin letters on a store written in another script ──────────────── */
@@ -2625,9 +3057,65 @@ async function main(base) {
     }
   }
 
-  /* ── what a customer actually gets: the home page, logged out ────────────────────────────────── */
-  const siteUrl = base.replace(/\/wp-json\/cl-api\/v1$/, '');
-  const publicHome = await checkPublicHome(siteUrl);
+  /* ── words for the merchant, and placeholders, where a shopper reads them ─────────────────────── */
+  const showcase = /^showcase\b/i.test(String(recorded.decisions?.purpose?.value ?? '').trim());
+  const reviewsRead = await walk(call, `${pathFor('reviews', 'reviews', R)}?approved=1`);
+  const settingsRead = await call(pathFor('store_settings', 'store_settings', R));
+  const sources = [
+    ...(pagesRead.rows ?? []).filter((p) => String(p.status ?? 'publish') === 'publish')
+      .map((p) => ({ where: `page "${clip(p.title ?? '', 30)}" (/${p.slug}/)`, text: `${p.title ?? ''} ${p.content ?? ''}` })),
+    ...(cb.rows ?? []).map((b) => ({ where: `custom block #${b.id}`, text: b.content })),
+    ...(reviewsRead.rows ?? []).map((r) => ({ where: `review #${r.id}`, text: `${r.title ?? ''} ${r.content ?? ''} ${r.author ?? ''}` })),
+    ...designs.map((d) => ({ where: `design ${d.label}`, text: designStrings(d.settings).join(' | ') })),
+    ...(productsRead.rows ?? []).filter((p) => String(p.status ?? 'publish') === 'publish').map((p) => ({ where: `product "${clip(p.title ?? '', 30)}"`,
+      text: [p.title, p.short_description, p.long_description, p.extra_description, p.upsell_description].join(' ') })),
+    { where: 'the store settings', text: designStrings(settingsRead.body?.settings ?? {}).join(' | ') },
+  ];
+  const scan = scanShopperText(sources);
+  const listed = (map) => [...map].slice(0, 12).map(([w, s]) => `        ${w}: ${[...s].join(', ')}`).join('\n') +
+    (map.size > 12 ? `\n        … and ${map.size - 12} more` : '');
+  if (showcase && (scan.placeholders.size || scan.notes.size)) {
+    const both = new Map(scan.placeholders);
+    for (const [w, s] of scan.notes) both.set(w, new Set([...(both.get(w) ?? []), ...s]));
+    problems.push(`this store is a SHOWCASE (its blueprint's \`purpose\`), so every page must read as a real store — but ${both.size}\n` +
+      `      place(s) still show a placeholder or words written to the merchant:\n${listed(both)}\n` +
+      '      SKILL.md → "Asking": a showcase gets believable contacts, legal pages without the draft line, and reviews\n' +
+      '      written as real.');
+  } else {
+    if (scan.notes.size) {
+      notes.push(`${scan.notes.size} place(s) a shopper reads hold words written to the merchant:\n${listed(scan.notes)}\n` +
+        '    A note to the merchant goes in the hand-over and its replace-list, never on a page: move each one there.');
+    }
+    if (scan.placeholders.size) notes.push(`placeholders still on the store — name each one in the replace-list:\n${listed(scan.placeholders)}`);
+  }
+  if (reviewsRead.error) notes.push(`reviews were NOT read for placeholders and notes to the merchant — ${reviewsRead.error}.`);
+
+  /* ── what WordPress left, and the store pages nothing links to ───────────────────────────────── */
+  const leftovers = await checkLeftovers(call, R, store, pagesRead, siteUrl, publicHome);
+  problems.push(...leftovers.problems);
+  notes.push(...leftovers.notes);
+
+  /* ── the custom code, listed for review ──────────────────────────────────────────────────────── */
+  const code = listCustomCode(store, designs, pagesRead, productsRead);
+  if (!code.readable) {
+    notes.push('custom code was NOT listed: this key cannot read it (the custom-code access on the key\'s form).');
+  } else if (code.pieces.length) {
+    notes.push(`${code.pieces.length} piece(s) of custom code run on this store — review each one:\n` +
+      code.pieces.slice(0, 15).map((p) => `        ${p}`).join('\n') + (code.pieces.length > 15 ? `\n        … and ${code.pieces.length - 15} more` : '') + '\n' +
+      '    A setting or a card design that does the same replaces it; CSS aimed inside a design nested in another does\n' +
+      '    nothing (joins.js reports it as dead-scoped-css); custom JS never stands in for a feature that changes what a\n' +
+      '    shopper sees — order, price, stock — report that gap instead. Check pages with custom layout CSS at 768 and\n' +
+      '    1200 too, not only 390 and 1440. references/review-the-tools.md → custom code says how to classify each.');
+  }
+
+  /* ── stock shown where no stock is counted ───────────────────────────────────────────────────── */
+  if (designs.some((d) => d.type === 'product' && yes(d.settings.stock_badge_is_active)) && !productsRead.error && !productsRead.rows.some(tracksStock)) {
+    notes.push('the stock badge and the low-stock line are on (`stock_badge_is_active`), but no product counts its stock\n' +
+      '    (`stock_mode`), so they show on no product. Turn stock tracking on for the products the merchant counts, or\n' +
+      '    switch them off.');
+  }
+
+  /* ── what a customer actually gets: the home page, logged out (read before the custom blocks) ─── */
   let hiddenStore = '';
   if (publicHome.error) {
     line(false, `the public home page could not be fetched — ${publicHome.error}`);
@@ -2643,10 +3131,25 @@ async function main(base) {
 
   /* ── the site's clock: every sale end, countdown and topbar date is read in its time zone ───────── */
   const zone = me.body.timezone;
+  /* What runs on that clock where a shopper sees it. With any of it on, a site left on UTC is a failure: a
+   * sale ending at 23:59 ends hours off for customers anywhere else. */
+  const dated = [];
+  if (designs.some((d) => d.type === 'product' && yes(d.settings.p_countdown_is_active))) dated.push('the product countdown');
+  if (!productsRead.error && productsRead.rows.some((p) => String(p.sale_to ?? '').trim() !== '')) dated.push('sales with an end date');
+  if (designs.some((d) => d.type === 'topbar' && (asArray(d.settings.topbar_messages) ?? [])
+    .some((m) => ['start_date', 'end_date', 'countdown_target'].some((k) => String(m?.[k] ?? '').trim() !== '')))) dated.push('dated topbar messages');
+  const clockAt = zone ? 'the site runs on UTC' : `the site keeps a fixed offset (${me.body.utc_offset ?? 'unknown'}) and no time zone`;
   if (zone === undefined) {
     notes.push('the site\'s time zone was NOT checked: this plugin does not report `timezone`.');
+  } else if ((zone === '' || zone === 'UTC') && dated.length && String(utcReason ?? '').trim().length < MIN_REASON) {
+    problems.push(`THE SITE'S CLOCK: ${clockAt}, and the store shows ${dated.join(', ')} — each runs on that clock,\n` +
+      '      hours off for customers anywhere else. Set the zone where they are (store_settings → timezone) and write the\n' +
+      '      dated rows again — api-recipes.md → "The site\'s time zone". If the customers really keep UTC, say so:\n' +
+      `        --utc-intended "<why, at least ${MIN_REASON} characters>"`);
+  } else if ((zone === '' || zone === 'UTC') && dated.length) {
+    line(true, `${clockAt}, with ${dated.join(', ')}, declared intentional: "${String(utcReason).trim()}"`);
   } else if (zone === '' || zone === 'UTC') {
-    notes.push(`THE SITE'S CLOCK: ${zone ? 'the site runs on UTC' : `the site keeps a fixed offset (${me.body.utc_offset ?? 'unknown'}) and no time zone`}, ` +
+    notes.push(`THE SITE'S CLOCK: ${clockAt}, ` +
       'so every sale end,\n    countdown and topbar date is read there. Unless the store\'s customers live on it, set the zone where they are\n' +
       '    (store_settings → timezone) and write the dated rows again — api-recipes.md → "The site\'s time zone".');
   } else {
@@ -2667,6 +3170,12 @@ async function main(base) {
   } else {
     notes.push('search visibility UNKNOWN: this plugin does not report `discourage_search_engines`. Do not tell the\n' +
       '    merchant the site is visible to search engines.');
+  }
+
+  if (hostChallenge.count) {
+    problems.push(`the HOST's bot check answered ${hostChallenge.count} read(s) instead of the store (${hostChallenge.paths.join(', ')}), so what\n` +
+      '      they feed was NOT checked. That is the hosting\'s protection ("Checking your browser"), not the store and not a\n' +
+      '      missing permission on the key: wait a few minutes and re-run, or ask the host to let this machine through.');
   }
 
   if (unreadable.length) {

@@ -52,6 +52,20 @@
  *                       block placed under two product sections drew a 22px header with no divider, a
  *                       14px grey chevron, a 12px gap and an unpadded body, against 59px, a 1px divider,
  *                       18px, 24px and 16px.
+ *   small-target        on a phone (under 768px wide), a control a shopper taps — a link, a button, a field,
+ *                       a toggle, a colour swatch's label over its hidden radio — under 44 × 44px in either
+ *                       direction (Apple: 44 × 44pt; WCAG 2.5.5: 44; Material: 48dp). The icon keeps its size;
+ *                       its box reaches 44 through padding. A link inside a sentence is not one, and identical
+ *                       targets are one finding with their count. Measured on one store: about 20 controls
+ *                       under 44px on a phone — header icons 20 to 22px tall, a card's "+" 30 × 26, colour
+ *                       dots 10 × 10, a drawer's × 16 × 22, footer links 18px tall.
+ *   dead-scoped-css     a design's custom CSS rule that can never apply. The store prints each design's CSS
+ *                       inside `@scope ([cl-design="…"]) to ([cl-design])`, which stops at every design nested
+ *                       in it: a rule matching nothing in its own design but something inside a nested one is
+ *                       stored, printed and dead. Measured on one store: 15 rules of three listing designs
+ *                       aimed at their cards' photo gallery (a 4:5 photo, image cover, the full-screen button,
+ *                       the arrows' look and hover) — the gallery is a slider design of its own, and not one
+ *                       of the 15 ever applied.
  *
  * A collapsible is a <details>, a block whose header toggles it with aria-expanded, or this plugin's own
  * toggle: an element carrying is_open="yes|no" whose first child is its header. To measure them open,
@@ -563,6 +577,208 @@
     });
   }
 
+  // ── small-target ──────────────────────────────────────────────────────────────────────────────
+  // On a phone every control a shopper taps is at least 44 × 44px: Apple's default (44 × 44pt; 28 at the
+  // very least), WCAG 2.5.5 (44; 2.5.8 allows 24), Material's 48dp. A small icon gets there through padding,
+  // as Material puts it: the icon keeps its size, the box around it grows. The target is where a tap lands —
+  // the element's box and everything shown inside it (an inline link around a photo reports only its text
+  // line). A field and its labels are one target, since tapping either works; a label over a hidden radio (a
+  // colour swatch, a size button) is the target itself. Not judged: a text link among other words on its line
+  // (WCAG's inline exception: the line sets its height), anything out of sight (a skip link, a field clipped
+  // or under 2px), anything a tap goes through, and what sits in a closed drawer (a fixed panel off the
+  // screen). Identical targets — same tag, same first class, the same size where they fall short — are one
+  // finding with their count: a row of colour dots is one line, not nine. Phones only, under 768px wide.
+  const phone = window.innerWidth < 768;
+  const TAPPABLE = 'a[href], button, input:not([type="hidden"]), select, textarea, summary, label, [role="button"], '
+    + '[role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="switch"], [role="menuitem"]';
+  // Out of sight: not shown, under 2px, clipped to nothing (a screen-reader-only skip link), or left of or above
+  // the page.
+  const unseen = (el) => {
+    if (!isShown(el)) return true;
+    const r = box(el);
+    const cs = getComputedStyle(el);
+    const clip = (String(cs.clip || '').match(/-?[\d.]+(?=px)/g) || []).map(Number);
+    return r.width < 2 || r.height < 2 || r.right + window.scrollX <= 0 || r.bottom + window.scrollY <= 0
+      || (clip.length === 4 && (clip[1] - clip[3] <= 1 || clip[2] - clip[0] <= 1)) || /^inset\((50|100)%/.test(cs.clipPath);
+  };
+  // A closed drawer: a fixed panel moved off the screen still holds its links.
+  const inClosedPanel = (el) => {
+    for (let a = el; a && a !== document.documentElement; a = a.parentElement) {
+      if (getComputedStyle(a).position !== 'fixed') continue;
+      const r = box(a);
+      if (r.right <= 0 || r.bottom <= 0 || r.left >= window.innerWidth || r.top >= window.innerHeight) return true;
+    }
+    return false;
+  };
+  // Where a tap lands: the element's box grown by every box shown inside it, unless it clips its content.
+  const hitBox = (el) => {
+    const r = box(el);
+    const a = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    const cs = getComputedStyle(el);
+    if (cs.overflowX === 'visible' && cs.overflowY === 'visible') {
+      for (const d of qa(':not(svg *)', el)) {
+        const dr = box(d);
+        if (!dr.width || !dr.height || (dr.left >= a.left && dr.top >= a.top && dr.right <= a.right && dr.bottom <= a.bottom) || unseen(d)) continue;
+        [a.left, a.top, a.right, a.bottom] = [Math.min(a.left, dr.left), Math.min(a.top, dr.top), Math.max(a.right, dr.right), Math.max(a.bottom, dr.bottom)];
+      }
+    }
+    return { width: a.right - a.left, height: a.bottom - a.top };
+  };
+  // WCAG's inline exception: a text link among other words — a sentence, or a row whose text sets its height
+  // ("Delivery … 0 MAD") — takes that line's height. Other words: visible text in the link's block, outside
+  // every other control, with a letter or a digit, on one of the link's lines.
+  const inRunningText = (link) => {
+    if (!text(link)) return false;
+    let block = link.parentElement;
+    while (block && block !== document.body && ['inline', 'contents'].includes(getComputedStyle(block).display)) block = block.parentElement;
+    if (!block) return false;
+    const own = Array.from(link.getClientRects());
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (link.contains(n) || !/[\p{L}\p{N}]/u.test(n.nodeValue) || !isShown(n.parentElement)) continue;
+      const other = n.parentElement.closest(TAPPABLE);
+      if (other && !other.contains(link)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      if (Array.from(range.getClientRects()).some((t) => own.some((o) => Math.min(t.bottom, o.bottom) - Math.max(t.top, o.top) > 2))) return true;
+    }
+    return false;
+  };
+  // What a shopper reads on it: its text, else its aria-label, title, a photo's alt, or its hidden radio's
+  // label or value.
+  const nameOf = (el) => {
+    const img = q('img[alt]', el);
+    const ctl = el.control || null;
+    const picked = el.tagName === 'SELECT' && el.selectedOptions && el.selectedOptions[0] ? el.selectedOptions[0].text : '';
+    return ((/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName) ? picked : text(el)) || el.getAttribute('aria-label') || el.getAttribute('title')
+      || el.getAttribute('placeholder') || (img && img.alt) || (ctl && (ctl.getAttribute('aria-label') || ctl.value)) || el.value || '')
+      .replace(/\s+/g, ' ').trim().slice(0, 30);
+  };
+  if (phone) {
+    const groups = new Map();
+    for (const el of qa(TAPPABLE)) {
+      // A label is a target of its own only over a hidden control; over a visible one it is part of that
+      // control's target, judged with it.
+      if (el.tagName === 'LABEL' && !(el.control && unseen(el.control))) continue;
+      if (unseen(el) || inClosedPanel(el) || getComputedStyle(el).pointerEvents === 'none') continue;
+      if (el.tagName === 'A' && inRunningText(el)) continue;
+      const parts = [el, ...Array.from(el.labels || []).filter((l) => !unseen(l))].map((p) => ({ el: p, r: hitBox(p) }));
+      if (parts.some((p) => round(p.r.width) >= 44 && round(p.r.height) >= 44)) continue;
+      const t = parts.reduce((x, y) => (y.r.width * y.r.height > x.r.width * x.r.height ? y : x));
+      const [w, h] = [round(t.r.width), round(t.r.height)];
+      const cls = typeof t.el.className === 'string' ? t.el.className.trim().split(/\s+/)[0] || '' : '';
+      const kind = t.el.tagName.toLowerCase() + (cls ? '.' + cls : '');
+      const key = `${kind} ${w < 44 ? w : ''}×${h < 44 ? h : ''}`;
+      const g = groups.get(key) || { kind, el: t.el, ws: [], hs: [], names: [] };
+      g.ws.push(w); g.hs.push(h); g.names.push(nameOf(t.el));
+      groups.set(key, g);
+    }
+    const span = (v) => (Math.min(...v) === Math.max(...v) ? `${v[0]}` : `${Math.min(...v)}–${Math.max(...v)}`);
+    for (const g of groups.values()) {
+      const names = [...new Set(g.names.filter(Boolean))];
+      const said = names.length ? ` (${names.slice(0, 3).map((s) => `"${s}"`).join(', ')}${names.length > 3 ? ' …' : ''})` : '';
+      flag('small-target', g.ws.length > 1 ? `${g.ws.length} × ${g.kind}` : describe(g.el),
+        `${span(g.ws)}×${span(g.hs)}px${said}, under the 44 × 44px a fingertip needs on a phone — reach 44 × 44 through padding in its preset or style key`);
+    }
+  }
+
+  // ── dead-scoped-css ───────────────────────────────────────────────────────────────────────────
+  // The store prints each design's custom CSS inside `@scope ([cl-design="…"]) to ([cl-design])`: a rule
+  // reaches its own design and stops at every design nested in it — a slider design in a listing's card, a
+  // countdown in a product's sticky bar. A rule aimed past that boundary is stored, printed and never applied.
+  // Each rule is matched the way @scope matches it: relative to the design's root (`:scope` and `&` are the
+  // root; a selector with neither is `:scope <selector>`), an element counting only when no boundary of that
+  // scope holds it. :hover, :focus, :active, :visited and pseudo-elements are set aside, so a hover style or a
+  // ::before is judged by the element it styles; a rule inside @media counts whatever the screen. Flagged: a
+  // rule that reaches nothing in its design but something past a boundary. A rule matching nothing anywhere
+  // may be for another page or state: not flagged.
+  let scopedRules = null; // stays null where this browser has no @scope: the check could not run
+  if (window.CSSScopeRule) {
+    scopedRules = 0;
+    // A selector list split on its top-level commas (not those inside :is(), [attr] or quotes).
+    const splitList = (s) => {
+      const parts = [];
+      let depth = 0;
+      let quote = '';
+      let cur = '';
+      for (const ch of String(s)) {
+        if (quote) { if (ch === quote) quote = ''; } else if (ch === '"' || ch === "'") quote = ch;
+        else if (ch === '(' || ch === '[') depth++;
+        else if (ch === ')' || ch === ']') depth--;
+        else if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; continue; }
+        cur += ch;
+      }
+      if (cur.trim()) parts.push(cur.trim());
+      return parts;
+    };
+    const STATE = ':(?:hover|focus-visible|focus-within|focus|active|visited)(?![\\w-])';
+    const atRest = (s) => {
+      const out = s.replace(new RegExp(`:not\\(\\s*(?:${STATE}[\\s,]*)+\\)`, 'gi'), '') // :not(:hover) holds at rest
+        .replace(new RegExp(STATE, 'gi'), '')
+        .replace(/::?(?:before|after|first-line|first-letter)(?![\w-])|::[\w-]+(?:\([^)]*\))?/gi, '').trim();
+      return !out || /[>+~]$/.test(out) ? `${out} *`.trim() : out;
+    };
+    // The roots of a scope on this page, each with its boundaries: the elements its `to (…)` matches inside it.
+    const rootsOf = new Map();
+    const roots = (scope) => {
+      if (!rootsOf.has(scope)) {
+        let found = [];
+        try { found = scope.start ? qa(scope.start) : []; } catch (e) { /* a start this browser cannot read */ }
+        rootsOf.set(scope, found.map((R) => {
+          let limits = [];
+          try { limits = scope.end ? qa(splitList(scope.end).map((s) => (/:scope(?![\w-])/.test(s) ? s : `:scope ${s}`)).join(', '), R) : []; } catch (e) { /* as above */ }
+          return { R, limits };
+        }));
+      }
+      return rootsOf.get(scope);
+    };
+    const reportedRules = new Set();
+    const judge = (scope, sels) => {
+      scopedRules++;
+      const found = roots(scope);
+      if (!found.length) return; // the design is not on this page
+      const past = new Set(); // the nested designs holding what the rule matches
+      for (const sel of sels) {
+        const plain = atRest(sel);
+        const rel = /:scope(?![\w-])/.test(plain) ? plain : `:scope ${plain}`;
+        for (const { R, limits } of found) {
+          let hits;
+          try { hits = qa(rel, R); if (R.matches(rel)) hits.unshift(R); } catch (e) { break; } // a selector this browser cannot read: skipped
+          for (const el of hits) {
+            const limit = limits.find((l) => l.contains(el));
+            if (!limit) return; // it applies in its own design
+            const holder = el.closest('[cl-design]');
+            past.add(holder && limit.contains(holder) ? holder.getAttribute('cl-design') : describe(limit));
+          }
+        }
+      }
+      const shown = sels.join(', ');
+      if (!past.size || reportedRules.has(`${scope.start} ${shown}`)) return;
+      reportedRules.add(`${scope.start} ${shown}`);
+      const held = [...past];
+      flag('dead-scoped-css', String(scope.start),
+        `"${shown.slice(0, 120)}" matches nothing in this design, only inside the nested design${held.length > 1 ? 's' : ''} ${held.slice(0, 3).join(', ')}${held.length > 3 ? ' …' : ''}, where this design's scoped CSS stops — never applied: move it into that design's own custom CSS, or use the setting that design has`);
+    };
+    // Every style rule inside a @scope, through @media, @supports and @layer, and a nested rule's `&` as its parent.
+    const walkScoped = (list, scope, parent) => {
+      for (const rule of Array.from(list)) {
+        if (rule instanceof CSSScopeRule) { walkScoped(rule.cssRules, rule, null); continue; }
+        if (rule.selectorText !== undefined) {
+          if (!scope) continue;
+          const sels = splitList(rule.selectorText).map((s) => (parent === null ? s.replace(/&/g, ':scope')
+            : s.includes('&') ? s.replace(/&/g, `:is(${parent})`) : `:is(${parent}) ${s}`));
+          judge(scope, sels);
+          if (rule.cssRules && rule.cssRules.length) walkScoped(rule.cssRules, scope, sels.join(', '));
+        } else if (rule.cssRules) {
+          walkScoped(rule.cssRules, scope, parent);
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      try { walkScoped(sheet.cssRules, null, null); } catch (e) { /* another origin: already in unreadable_stylesheets */ }
+    }
+  }
+
   const shownOpen = shownCollapsibles.filter((c) => c.open).length;
   const openCollapsibles = shownOpen;
   const collapsibles = shownCollapsibles.length;
@@ -573,12 +789,15 @@
     collapsibles, open_collapsibles: openCollapsibles,
     rhythm: rhythm ? { stack: Number(rhythm.stack), section: Number(rhythm.section) || null } : null,
     unreadable_stylesheets: unreadable,
+    scoped_rules: scopedRules,
     findings,
   };
   console.log(JSON.stringify(result, null, 2));
   console.info(`joins.js: ${findings.length} finding(s) at ${window.innerWidth}×${window.innerHeight}, ${openCollapsibles} of ${collapsibles} collapsible(s) open.`
     + (collapsibles ? ' Run it again with every collapsible in the other state.' : '')
     + (rhythm ? '' : ' Spacing NOT checked: set window.CL_JOINS_RHYTHM = { stack, section } (the store\'s density) and run it again.')
+    + (phone ? '' : ' Tap targets NOT checked: they are judged on a phone only — run it again at 390×844.')
+    + (scopedRules === null ? ' Scoped CSS NOT checked: this browser has no @scope (scoped_rules: null).' : '')
     + (unreadable.length ? `\n${unreadable.length} stylesheet(s) could not be read (another origin): a browser-default finding is marked certain: false.` : ''));
   return result;
 })();

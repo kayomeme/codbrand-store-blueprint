@@ -67,12 +67,18 @@ const market = flag('market');
  * stops — which is exactly what happened on the first real run, silently, because nothing checked.
  * A missing companion is a setup problem with a one-line fix, so it is worth saying out loud before
  * any work starts rather than discovering it after the palette and designs are already written.
+ *
+ * Looked for where SKILL.md says to put it — BESIDE this skill, in the project's own skills folder,
+ * wherever this script is run from — then in the project folder of the working directory, and last in the
+ * global folder (the fallback SKILL.md allows only when there is no project). An earlier version looked in
+ * the last two only, and told the merchant to copy it into the global folder SKILL.md tells them not to use.
  */
 function findCompanionSkill(name = 'codbrand-content-builder') {
   const home = process.env.HOME || process.env.USERPROFILE || '';
   const candidates = [
-    join(home, '.claude', 'skills', name, 'SKILL.md'),
+    join(dirname(dirname(dirname(resolve(fileURLToPath(import.meta.url))))), name, 'SKILL.md'),
     join(process.cwd(), '.claude', 'skills', name, 'SKILL.md'),
+    join(home, '.claude', 'skills', name, 'SKILL.md'),
   ];
   return candidates.find((p) => existsSync(p)) || null;
 }
@@ -165,7 +171,8 @@ function pathFor(slug, fallback, resources) {
 const line = (ok, text) => console.log(`  ${ok ? '✓' : '✗'} ${text}`);
 
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 
 /**
@@ -527,8 +534,9 @@ async function main(base) {
     console.error('\nSTOP. The companion skill is missing.');
     console.error('This skill decides WHAT the store should be; `codbrand-content-builder` renders');
     console.error('the pages. Without it the build reaches the content phase and cannot continue.\n');
-    console.error('Install it alongside this one:\n');
-    console.error('    cp -r codbrand-content-builder ~/.claude/skills/\n');
+    console.error('Fetch it BESIDE this one, at the tag the store names for it (`GET /me` → `skills`), the way');
+    console.error('SKILL.md fetched this skill — into the project you are working in, not the global folder:\n');
+    console.error('    <the project you are working in>/.claude/skills/codbrand-content-builder/\n');
     console.error('Then run this preflight again.\n');
     return 1;
   }

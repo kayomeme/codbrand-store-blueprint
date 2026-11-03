@@ -180,7 +180,7 @@ needs, because most of them render nothing without rows.
 | Quick view | `plist1` → `quickview_bt_is_active`. For OFF, also `product` → `p_upsell_quickview_bt_is_active` and `thankyou` → `quickview_bt_is_active` | — |
 | Stories | `product` → `stories_is_active` (ships `no`) | active stories (`stories`) |
 | Discount codes | `cart` → `cart_coupon_is_active` (ships `no`); the same box also shows on checkout | active codes (`coupons`), which a person creates in wp-admin: the api only reads them (`/docs/coupons`). Ask for the code before any copy names one. The box shows with none, and no code typed into it can work |
-| Back-in-stock alerts | `product` → `stock_waitlist_is_active` | — |
+| Back-in-stock alerts | `product` → `stock_waitlist_is_active` | products that count their stock (`stock_mode` `product` or `variant` on `products`): the alert shows only where a product counts its stock and sells out. The stock badge and the low-stock line (`product` → `stock_badge_is_active`) need the same |
 | Ad tracking | no design switch | an active pixel on the store's tracking design (`tracking/*`) |
 | Countdown timer | `product` → `p_countdown_is_active` (ships **`yes`**). For OFF, also `p_upsell_countdown_is_active`, `sticky_button_countdown_display` (`hide`), `thankyou` → `upsell_countdown_is_active`, and any topbar message with a countdown | shows only on a product whose sale has a start date and an end date still ahead. Never invent a sale to make it show |
 | Search | `search` → `search_is_active`, plus at least one entry point that is not `none`: `header_search_render`, `inline_search_bar_header_position`, `inline_search_bar_footer_position`, `inline_search_bar_results_page_position`, `floating_button_position` | — |

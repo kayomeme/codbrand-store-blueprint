@@ -188,6 +188,14 @@ others alone.
 finish the store, and tell them at handover that the funnel needs one Save in wp-admin → Store
 settings before they take a real order. That is a sentence they can act on; a dead build is not.
 
+**Two more pages belong to the funnel, and WordPress leaves two of its own.** Order tracking and My
+account are reached from the header or the footer, so link both, and style their designs (the store
+row's `order_tracking_sm_id`, `my_account_sm_id`) like the checkout: titles, fields and buttons from its
+presets. Measured on one store: their titles in a display face while every other funnel title was the body
+face. WordPress's own "Sample Page" and "Hello world!" stay published until someone removes them; take
+both off the site through the pages and posts doors. `handover.mjs` fails them, and warns about every
+store page no link reaches.
+
 ## Express checkout — a decision, not a default
 
 Express checkout puts the whole order on the product page: the shopper opens a product, fills the
@@ -288,6 +296,22 @@ it off whichever page held it — there is only ever one. Sending `"no"` on the 
 holds it hands the domain root back to the blog index: a normal `200`, and the store stops answering
 at its own root. Send the key on the ONE page that should be the front page and omit it everywhere
 else; never send `"no"` as a tidy-up.
+
+**Every control a thumb can hit is 44 × 44px on phones** — header icons, a card's quick-add, swatches and
+size buttons, close buttons, footer links. Reach it through padding (or a minimum size) in the control's
+card design or style key, never by enlarging the icon; the icon designs that ship for arrows and close
+buttons are already 44px. Apple asks 44 × 44 pt, Material 48 × 48 dp. Measured on one store: about twenty
+controls under 44px at phone width, each with a key that could have padded it. `joins.js` lists every
+smaller one on a phone (`small-target`).
+
+**Custom code is the last door, and it never stands in for a feature.** What a setting or a card design
+can say belongs there, not in CSS. CSS written on a design reaches that design only — not a design nested
+in it, such as a listing card's photo gallery or a countdown inside a sticky bar (`/docs/custom_code_css_js`
+→ "What scoped CSS cannot reach"). And custom JS never imitates a feature that changes what a shopper sees
+— order, price, stock: measured on one store, a sort written in JS reordered only the cards already loaded,
+so past the first page the cheapest product came last. Report the missing feature instead.
+`handover.mjs` lists every piece of custom code for review; `joins.js` reports CSS a nested design never
+receives (`dead-scoped-css`).
 
 ## Idempotency, so a re-run is safe
 
@@ -400,6 +424,17 @@ Otherwise use one column. The listing design's `mobile_columns` setting holds it
 the design, so set the page's blocks as well, or leave them on `inherit`. Read the design's
 `settings_schema` for the current buttons-layout values rather than trusting this paragraph. Then look
 at the grid at 390px in the phase-10 browser pass.
+
+### The filter: groups open while they fit
+
+A shopper should see every choice without opening anything, and a group closes only when they would
+not fit. So in the phone drawer and in a sidebar, `filter_group_header_display` is `show_open`; a closed
+value is for a long list of groups. The one-row bar on computers shows each group as a dropdown whatever
+this says, so `show_open` is safe beside it. That is what Shopify's Horizon theme does (every vertical
+group open, on computers and phones); Dawn opens the first. Measured on one store: two groups closed in a
+drawer with 640px empty under them. The drawer itself: pad it through `filter_drawer_style` — 24px or less
+at the top and sides, more is room taken from the filters — and give its close button an icon design of
+44px or more (`/docs/plist1_global_settings` → "The drawer"). `handover.mjs` warns about both.
 
 ### Reviews on a product page get one or two columns, never three
 
@@ -559,8 +594,12 @@ A logo is two writes, not one, and the failure mode is silent.
 1. **Brief it** from the archetype and the brand name — what it should feel like, not how to draw it.
 2. **Produce it** — the agent you are running in, by whatever means it has.
 3. **Upload it** through `media` and keep the returned `id` and `url`.
-4. **Point BOTH places at it.** The header design carries its own logo fields, and the site-wide logo
-   is a column on **`stores`** — `site_logo_id`. Setting only one leaves the other showing nothing.
+4. **Point BOTH places at it — they do two different jobs.** The header design's own logo fields draw
+   the header. `site_logo_id`, a column on **`stores`**, is the brand image search engines get as the
+   Organization logo and that every page with no image of its own shows when it is shared (its
+   og:image); it draws nothing in the header (`/docs/stores`). So **a text wordmark still sets
+   `site_logo_id`**: measured on one store, a link to its home page shared on WhatsApp showed no picture,
+   because only its product pages had an image. A square brand image shares best.
 
    ⚠️ **The logo and the favicon are two different images, and `store_settings` writes both.**
    `site_logo_id` is the wide brand mark and is what search engines get as the organisation logo;
