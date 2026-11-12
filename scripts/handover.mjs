@@ -1818,15 +1818,17 @@ const FEATURES = {
   product_upsells: {
     label: 'Upsell offer',
     state: (c) => combine([probe(c, 'product', 'p_upsell_is_active')]),
-    rows: { upsells: true, what: 'products carrying upsells', gates: true },
+    /* What the picked upsell offers on a product page: its picked products and automatic sources on every page,
+     * else each product's own pairings (and, for a Bought together box, its lists). */
+    rows: { upsellOffer: true, what: 'products to offer on the product page', gates: true },
     goal: goalUpsells,
   },
   quickview: {
     label: 'Quick view',
     state: (c) => combine(
       [probe(c, 'plist1', 'quickview_bt_is_active')],
-      [probe(c, 'product', 'p_upsell_quickview_bt_is_active', yes, ['p_upsell_is_active', 'yes']),
-       probe(c, 'thankyou', 'quickview_bt_is_active', yes, ['upsell_is_active', 'yes'])],
+      /* The upsells' cards and the thank-you upsell carry their own Quick View button (since the upsells design). */
+      [upsellProbe(c, 'look_quickview_bt_is_active', ['cards', 'thankyou'])],
     ),
   },
   stories: {
@@ -1854,9 +1856,9 @@ const FEATURES = {
     label: 'Countdown timer',
     state: (c) => combine(
       [probe(c, 'product', 'p_countdown_is_active')],
-      [probe(c, 'product', 'p_upsell_countdown_is_active', yes, ['p_upsell_is_active', 'yes']),
+      [upsellProbe(c, 'look_countdown_is_active', ['cards', 'thankyou']),
+       upsellProbe(c, 'look_visitor_timer_is_active', ['cards']),
        probe(c, 'product', 'sticky_button_countdown_display', (v) => String(v) !== 'hide', ['sticky_button_is_active', 'yes']),
-       probe(c, 'thankyou', 'upsell_countdown_is_active', yes, ['upsell_is_active', 'yes']),
        probe(c, 'topbar', 'topbar_messages', (v) => (asArray(v) ?? []).some((m) => String(m?.countdown_target ?? '').trim() !== ''))],
     ),
   },
@@ -2107,23 +2109,45 @@ async function rowsFor(call, R, ctx, spec, productsRead, full = false) {
     if (productsRead.error) return { error: `products could not be read — ${productsRead.error}` };
     return { count: productsRead.rows.filter(spec.products).length };
   }
-  if (spec.upsells) {
+  if (spec.upsellOffer) {
     if (productsRead.error) return { error: `products could not be read — ${productsRead.error}` };
-    /* Upsells are read through the product that offers them, one product at a time. Without `full`,
-     * stop at the first product carrying any: the question is only whether the feature has anything
-     * to show. With it, read every published product's: the goal probe counts how many carry them
-     * and reads what they offer. */
-    const path = pathFor('product_upsells', 'product/upsells', R);
+    if (ctx.upsells.unread) return { error: ctx.upsells.unread };
+    const legacy = ctx.upsells.legacy.filter((l) => l.endsWith('.p_upsell'));
+    if (legacy.length) return { error: `this plugin keeps the upsell on the product design (${legacy.join(', ')}), before the upsells design this skill reads` };
+    /* What the product page's picked upsell(s) offer (/docs/upsells_global_settings → "Where the products come
+     * from"): its picked products and any source that finds products by itself — a category, the best sellers… —
+     * reach EVERY product page; `own_upsells` only the products paired for the product page (`product/upsells`, a
+     * row's `pages`; none listed = all four); a Bought together box the viewed product's lists, else those pairings.
+     * Without `full`, stop at the first product with something to offer. */
+    const offers = ctx.upsells.picked.filter((u) => u.block === 'p_upsell');
     const published = productsRead.rows.filter((p) => String(p.status ?? 'publish') === 'publish');
+    const sources = (u) => (asArray(u.settings.products_sources) ?? []).map((s) => String(s?.type ?? ''));
+    const everywhere = offers.find((u) => u.look !== 'bought_together'
+      && ((asArray(u.settings.products_picked_ids) ?? []).length > 0 || sources(u).some((t) => t !== 'products' && t !== 'own_upsells')));
+    if (everywhere && !full) return { count: 1 };
     const upsold = new Map();
-    for (const p of full ? published : productsRead.rows) {
-      const res = await call(`${path}?product_id=${encodeURIComponent(p.id)}&per_page=${full ? PAGE_SIZE : 1}`);
-      if (res.status !== 200) return { error: `product/upsells for product ${p.id} answered HTTP ${res.status}` };
-      const found = listRows(res.body) ?? [];
-      if (found.length && !full) return { count: 1 };
-      if (found.length) upsold.set(String(p.id), found);
+    if (offers.some((u) => u.look === 'bought_together')) {
+      const lists = await walk(call, pathFor('bought_together', 'bought_together', R));
+      if (lists.error) return { error: `could not read the Bought together lists — ${lists.error}` };
+      for (const l of lists.rows) {
+        const ids = (asArray(l.product_ids) ?? []).map(String);
+        if (ids.length < 2) continue;
+        for (const id of ids) upsold.set(id, [...(upsold.get(id) ?? []), ...ids.filter((x) => x !== id).map((x) => ({ id: x }))]);
+      }
     }
-    return full ? { count: upsold.size, total: published.length, upsold } : { count: 0 };
+    if (offers.some((u) => u.look === 'bought_together' || sources(u).includes('own_upsells'))) {
+      const path = pathFor('product_upsells', 'product/upsells', R);
+      for (const p of published) {
+        if (!full && upsold.size) break;
+        const res = await call(`${path}?product_id=${encodeURIComponent(p.id)}&per_page=${PAGE_SIZE}`);
+        if (res.status !== 200) return { error: `product/upsells for product ${p.id} answered HTTP ${res.status}` };
+        const found = (listRows(res.body) ?? []).filter((r) => !Array.isArray(r.pages) || r.pages.includes('product'));
+        if (found.length) upsold.set(String(p.id), [...(upsold.get(String(p.id)) ?? []), ...found]);
+      }
+    }
+    const reached = published.filter((p) => upsold.has(String(p.id))).length;
+    if (!full) return { count: everywhere ? 1 : Math.min(reached, 1) };
+    return { count: everywhere ? published.length : reached, total: published.length, upsold, everywhere: everywhere?.label ?? null };
   }
   let query = spec.query;
   const instance = Number(ctx.store?.tracking_sm_id ?? 0);
@@ -2154,44 +2178,55 @@ function partialReach(feature, reached, total, reason) {
  * card text where the cards show text, on the products the merchant meant. Measured on one build: a
  * strip with no title (`always_visible` dropped it), no saving and empty card text on 20 of 20
  * products, while "products carry upsells" passed.
+ *
+ * Read on the upsell design the product page's block picks (A, and B in an A/B test), by its look — the plugin's
+ * own views (comps/upsells/frontend/views/look/): the cards show `look_header_title` in their header, which
+ * `always_visible` hides unless `look_always_visible_header_is_active`; the tick boxes show `look_heading_text`; a
+ * Bought together box `look_bought_together_heading_text`. The saving is `products_discount_value`, or an offered
+ * product on sale (never in a Bought together box, which saves nothing at 0). Until the upsells design (04-11-2026)
+ * all of this sat on the product design as `p_upsell_*`.
  */
 async function goalUpsells(ctx, productsRead, rows, reason) {
   const problems = [];
   const byId = new Map(productsRead.rows.map((p) => [String(p.id), p]));
-  const upsold = [...new Set([...rows.upsold.values()].flat().map((u) => String(u.id)))].map((id) => byId.get(id)).filter(Boolean);
+  const paired = [...new Set([...rows.upsold.values()].flat().map((u) => String(u.id)))].map((id) => byId.get(id)).filter(Boolean);
   const onSale = (p) => String(p.on_sale ?? '') === 'yes' || yes(p.on_sale) ||
     (Number(p.sale_price) > 0 && Number(p.sale_price) < Number(p.regular_price));
-  for (const d of ctx.designsOf('product')) {
-    const s = d.settings;
-    if (!yes(s.p_upsell_is_active)) continue;
-    const title = String(s.p_upsell_header_title ?? '').trim();
-    /* `always_visible` drops the header unless its own switch shows it (a plugin without the switch
-     * always drops it): /docs/product_global_settings → "The upsell's title in always_visible". */
-    if (String(s.p_upsell_display_type) === 'always_visible' && !yes(s.p_upsell_always_visible_header_is_active)) {
-      problems.push(`${d.label}: the upsell shows NO title — display type "always_visible" drops the header and its\n` +
-        `      \`p_upsell_header_title\` (${JSON.stringify(clip(title, 40))}). Switch on \`p_upsell_always_visible_header_is_active\`\n` +
-        '      (where the store has it) or use a collapsible display type, so the shopper reads why these products\n' +
-        '      are offered.');
-    } else if (!title) {
-      problems.push(`${d.label}: \`p_upsell_header_title\` is empty, so the upsell strip has no title.`);
+  for (const u of ctx.upsells.picked.filter((x) => x.block === 'p_upsell')) {
+    const s = u.settings;
+    const who = `${u.label} (picked by ${u.page})`;
+    const ownPairs = (asArray(s.products_sources) ?? []).some((x) => x?.type === 'own_upsells');
+    const picked = (asArray(s.products_picked_ids) ?? []).map((id) => byId.get(String(id))).filter(Boolean);
+    const offered = u.look === 'bought_together' ? paired : [...new Set([...picked, ...(ownPairs ? paired : [])])];
+    if (u.look === 'cards') {
+      const title = String(s.look_header_title ?? '').trim();
+      if (String(s.look_display_type) === 'always_visible' && !yes(s.look_always_visible_header_is_active)) {
+        problems.push(`${who}: the upsell shows NO title — display type "always_visible" hides the header and its\n` +
+          `      \`look_header_title\` (${JSON.stringify(clip(title, 40))}). Switch on \`look_always_visible_header_is_active\`\n` +
+          '      or use a collapsible display type, so the shopper reads why these products are offered.');
+      } else if (!title) {
+        problems.push(`${who}: the upsell shows NO title — \`look_header_title\` is empty.`);
+      }
+    } else {
+      const key = u.look === 'ticks' ? 'look_heading_text' : 'look_bought_together_heading_text';
+      if (!String(s[key] ?? '').trim()) problems.push(`${who}: the upsell shows NO title — \`${key}\` is empty (the ${u.look} look).`);
     }
-    const discount = Number(s.p_upsell_discount_percentage ?? 0);
-    const pricesShown = yes(s.p_upsell_regular_price_is_active) || yes(s.p_upsell_sale_price_is_active);
-    if (!(discount > 0) && !upsold.some(onSale)) {
-      problems.push(`${d.label}: the upsell offers NO saving — \`p_upsell_discount_percentage\` is 0 and no upsold product\n` +
+    const discount = Number(s.products_discount_value ?? 0);
+    if (!(discount > 0) && !(u.look !== 'bought_together' && offered.some(onSale))) {
+      problems.push(`${who}: the upsell offers NO saving — \`products_discount_value\` is 0 and no product it offers\n` +
         '      is on sale — so it shows products at full price with no reason to add them. An offer is a promise: set the\n' +
         '      saving the merchant agreed to, and ask them when they have not said. Never invent one.');
-    } else if (!pricesShown) {
-      problems.push(`${d.label}: the upsell has a saving, but both of its price displays are off, so nobody sees it.`);
+    } else if (u.look === 'cards' && !yes(s.look_regular_price_is_active) && !yes(s.look_sale_price_is_active)) {
+      problems.push(`${who}: the upsell has a saving, but both of its price displays are off, so nobody sees it.`);
     }
-    if (yes(s.p_upsell_card_description_is_active) && upsold.length &&
-        upsold.every((p) => !String(p.upsell_description ?? '').replace(/<[^>]*>/g, '').trim())) {
-      problems.push(`${d.label}: upsell cards show a description, but none of the ${upsold.length} upsold product(s) has an\n` +
+    if (u.look === 'cards' && yes(s.look_card_description_is_active) && offered.length &&
+        offered.every((p) => !String(p.upsell_description ?? '').replace(/<[^>]*>/g, '').trim())) {
+      problems.push(`${who}: upsell cards show a description, but none of the ${offered.length} product(s) it offers has an\n` +
         '      `upsell_description`, so every card\'s text line is empty. Write them on those products, or switch the\n' +
         '      description off.');
     }
   }
-  const reach = partialReach('the upsell', rows.count, rows.total, reason);
+  const reach = rows.everywhere ? null : partialReach('the upsell', rows.count, rows.total, reason);
   if (reach) problems.push(reach);
   return { problems, notes: [] };
 }
@@ -2468,16 +2503,31 @@ async function checkLeftovers(call, R, store, pagesRead, siteUrl, publicHome) {
  * design that paints it transparent leaves the popup's text straight on the page behind — measured on one
  * store, a thank-you upsell shown as a modal over the order lines. Read from each design's own
  * style_generator: any card design or style whose selector reaches the popup's box, on a design whose
- * matching `*_display_type` (when it has one) shows that popup. */
+ * matching `*_display_type` (when it has one) shows that popup.
+ *
+ * Since the upsells design (04-11-2026) an upsell's popups are dressed on the upsell the page's block picks, each shown
+ * by its own setting (read on dev1's upsells 234 and 254, 12-11-2026): the thank-you popup's box
+ * `look_modal_container_preset` while `look_placement` is `popup`, the cart's after-add and before-checkout pop-ups'
+ * while it is `after_add` / `before_checkout`, the "added" confirmation's while `look_success_feedback` shows it —
+ * never inside a cart pop-up, where the plugin answers an add with the toast (one pop-up at a time). */
+const SUCCESS_POPUP = (s) => ['modal', 'both'].includes(String(s.look_success_feedback ?? 'both'))
+  && !['after_add', 'before_checkout'].includes(String(s.look_placement));
+const UPSELL_POPUPS = {
+  look_modal_container_preset: (s) => s.look_placement === 'popup',
+  look_after_add_container_preset: (s) => s.look_placement === 'after_add',
+  look_before_checkout_container_preset: (s) => s.look_placement === 'before_checkout',
+  look_success_modal_preset: SUCCESS_POPUP,
+  look_success_modal_style: SUCCESS_POPUP,
+};
 function checkPopupPanels(designs, presetsById, resolve) {
   const problems = [];
   for (const d of designs) {
     for (const [key, cfg] of Object.entries(d.styleGen ?? {})) {
       if (!String(cfg?.css_selector ?? '').includes('.cl_modal_container')) continue;
       const prefix = key.replace(/_(container_)?(preset|style)$/, '');
-      const display = d.settings[`${prefix}_display_type`];
-      if (display !== undefined && !/modal/.test(String(display))) continue;
-      const active = d.settings[`${prefix}_is_active`];
+      const display = d.upsell ? undefined : d.settings[`${prefix}_display_type`];
+      if (d.upsell ? !(UPSELL_POPUPS[key]?.(d.settings) ?? true) : display !== undefined && !/modal/.test(String(display))) continue;
+      const active = d.upsell ? undefined : d.settings[`${prefix}_is_active`];
       if (active !== undefined && !yes(active)) continue;
       let maps = [];
       let what = `\`${key}\``;
@@ -2502,7 +2552,10 @@ function checkPopupPanels(designs, presetsById, resolve) {
  * no other check reads. Measured on one store: a third of its custom rules did nothing (CSS aimed inside a
  * design nested in another stops at its edge), a few repeated a setting, two broke the layout between
  * phone and desktop widths, and a custom-JS sort reordered only the cards already loaded. Listed here so
- * each piece is reviewed; whether a rule applies is measured in the browser (joins.js → dead-scoped-css). */
+ * each piece is reviewed; whether a rule applies is measured in the browser (joins.js → dead-scoped-css).
+ * Every design a shopper meets is listed, with where it shows: the store row's, those shownDesigns() finds placed or
+ * named elsewhere, and the upsells the pages' blocks pick — measured on one store, three designs with custom CSS
+ * placed only on pages, in a custom block or by another design were missed while only the store row's were read. */
 function listCustomCode(store, designs, pagesRead, productsRead) {
   const pieces = [];
   let readable = false;
@@ -2516,7 +2569,8 @@ function listCustomCode(store, designs, pagesRead, productsRead) {
     if (parts.length) pieces.push(`${where}: ${parts.join(', ')}`);
   };
   add('the store', store?.custom_css, store?.custom_js);
-  for (const d of designs) add(`design ${d.label}`, d.custom?.css, d.custom?.js);
+  const places = (w) => w.slice(0, 3).join('; ') + (w.length > 3 ? `; and ${w.length - 3} more place(s)` : '');
+  for (const d of designs) add(`design ${d.label}${d.where?.length ? ` (${places(d.where)})` : ''}`, d.custom?.css, d.custom?.js);
   for (const p of pagesRead.rows ?? []) if (String(p.status ?? 'publish') === 'publish') add(`page "${clip(p.title ?? '', 30)}"`, p.custom_css, p.custom_js);
   for (const p of productsRead.rows ?? []) add(`product "${clip(p.title ?? '', 30)}"`, p.custom_css, p.custom_js);
   return { readable, pieces };
@@ -2578,40 +2632,162 @@ const LOOK_KEYS = {
   plist1: ['product_tags_photo_position', 'discount_photo_position', 'stock_badge_photo_position', 'product_title_preset',
     'regular_price_text_preset', 'sale_price_text_preset', 'single_product_preset', 'product_image_container_style'],
 };
+/* How a page or a custom block places a design, by the plugin's own names (its `block.json` files and
+ * `add_shortcode()` calls, read 12-11-2026): the block → the design type and the attributes naming the design. A
+ * listing block with no `instanceId` shows the store's own design. */
+const PLACED_BLOCKS = { 'products-listing': ['plist1', ['instanceId']], catlist: ['catlist', ['instanceId']],
+  reviewlist: ['reviewlist', ['instanceId']], slider: ['slider', ['instanceId', 'phoneInstanceId']] };
+const PLACED_SHORTCODES = { products: ['plist1', ['id']], cl_catlist: ['catlist', ['id']],
+  cl_reviewlist: ['reviewlist', ['id']], cl_slider: ['slider', ['id', 'phone_id']] };
+/* Keys by which one design names another: [the design type carrying it, the key, the type it names]. 0 is the
+ * type's default, which is not followed. */
+const NAMED_DESIGNS = [['category', 'design_template', 'plist1'], ['product', 'reviews_design_template', 'reviewlist'],
+  ['product', 'gallery_slider_id', 'slider'], ['plist1', 'product_card_gallery_slider_id', 'slider'],
+  ['reviewlist', 'review_media_slider_id', 'slider']];
+
 /**
- * The list designs a store shows beyond the ones its row points at: a category page's `design_template`
- * (products), a product page's `reviews_design_template` (reviews), and those a published page or a shown
- * custom block names — the `"instanceId"` of a `cl/<type>` block, the `id` of a `[cl_<type>]` shortcode. Read
- * once, for the checks that judge every list a shopper meets. A name that reads nothing is skipped here: the
- * card-gap check reports a template that points at no design.
+ * The designs a store shows beyond the ones its row points at, each with WHERE it shows: those another design
+ * names (NAMED_DESIGNS — a category page's listing, a product page's reviews and photo gallery, a listing card's
+ * gallery), those a published page or a shown custom block places (PLACED_BLOCKS, PLACED_SHORTCODES), and a
+ * product's own gallery (`slider_id`, `phone_slider_id` on `products`). Followed one level from every design found,
+ * so a slider inside a placed listing is read too. Read once, for the checks that judge every design a shopper
+ * meets. A name that reads nothing is skipped here: the card-gap check reports a template that points at no design.
+ * Measured on one store before this: three designs carrying custom CSS — a listing placed on its shop and category
+ * pages, one in a custom block, a product page's photo gallery — were never read.
  */
-async function shownListDesigns(call, R, designs, pagesRead, blockRows) {
+async function shownDesigns(call, R, designs, pagesRead, blockRows, productsRead) {
   const gsPath = pathFor('section_manager_global_settings', 'section_manager/global_settings', R);
   const wanted = new Map();
-  const add = (type, id) => {
-    if (id > 0 && !designs.some((d) => d.type === type && Number(d.id) === id)) wanted.set(`${type}/${id}`, [type, id]);
+  const add = (type, id, where) => {
+    if (!(id > 0)) return;
+    /* The store's own design placed again on a page keeps that place too, after "the store's own". */
+    const own = designs.find((d) => d.type === type && Number(d.id) === id);
+    if (own) {
+      own.where ??= ["the store's own"];
+      if (!own.where.includes(where)) own.where.push(where);
+      return;
+    }
+    const key = `${type}/${id}`;
+    if (!wanted.has(key)) wanted.set(key, { type, id, where: [] });
+    if (!wanted.get(key).where.includes(where)) wanted.get(key).where.push(where);
   };
-  for (const d of designs) {
-    if (d.type === 'category') add('plist1', Number(d.settings.design_template));
-    if (d.type === 'product') add('reviewlist', Number(d.settings.reviews_design_template));
-  }
-  const texts = [...(pagesRead.rows ?? []).filter((p) => String(p.status ?? 'publish') === 'publish').map((p) => p.content),
-    ...blockRows.map((b) => b.content)];
-  for (const type of ['plist1', 'catlist', 'reviewlist']) {
-    for (const t of texts) {
-      for (const m of String(t ?? '').matchAll(new RegExp(`wp:cl/${type}\\s+(\\{[^}]*\\})`, 'g'))) {
-        try { add(type, Number(JSON.parse(m[1]).instanceId)); } catch { /* not JSON */ }
-      }
-      for (const m of String(t ?? '').matchAll(new RegExp(`\\[cl_${type}\\b[^\\]]*?\\bid=["']?(\\d+)`, 'g'))) add(type, Number(m[1]));
+  const named = (d) => {
+    for (const [from, key, type] of NAMED_DESIGNS) if (d.type === from) add(type, Number(d.settings[key]), `${d.label} \`${key}\``);
+  };
+  designs.forEach(named);
+  const placed = [
+    ...(pagesRead.rows ?? []).filter((p) => String(p.status ?? 'publish') === 'publish').map((p) => [`page "${clip(p.title ?? '', 30)}"`, p.content]),
+    ...blockRows.map((b) => [`custom block #${b.id}`, b.content]),
+  ];
+  for (const [where, text] of placed) {
+    const t = String(text ?? '');
+    for (const m of t.matchAll(/<!--\s*wp:cl\/([a-z-]+)\s+(\{[\s\S]*?\})\s*\/?-->/g)) {
+      const block = PLACED_BLOCKS[m[1]];
+      if (!block) continue;
+      for (const attr of block[1]) add(block[0], Number((m[2].match(new RegExp(`"${attr}"\\s*:\\s*"?(\\d+)`)) || [])[1]), where);
+    }
+    for (const m of t.matchAll(/\[(products|cl_catlist|cl_reviewlist|cl_slider)\b([^\]]*)\]/g)) {
+      const [type, attrs] = PLACED_SHORTCODES[m[1]];
+      for (const attr of attrs) add(type, Number((m[2].match(new RegExp(`\\b${attr}=["']?(\\d+)`)) || [])[1]), where);
     }
   }
+  for (const p of productsRead.rows ?? []) {
+    for (const key of ['slider_id', 'phone_slider_id']) add('slider', Number(p[key]), `product "${clip(p.title ?? '', 30)}" \`${key}\``);
+  }
+  /* Each design read once; one read can name more (a placed listing's card gallery), so go on until none is new. */
   const out = [];
-  for (const [label, [type, id]] of wanted) {
-    const res = await call(`${gsPath}/${type}/${id}`);
-    const settings = res.body?.settings ?? res.body?.data?.settings;
-    if (res.status === 200 && settings && typeof settings === 'object') out.push({ label, type, id, settings });
+  const tried = new Set();
+  for (let more = true; more;) {
+    more = false;
+    for (const [key, w] of [...wanted]) {
+      if (tried.has(key)) continue;
+      tried.add(key);
+      more = true;
+      const res = await call(`${gsPath}/${w.type}/${w.id}`);
+      const top = res.body?.data ?? res.body ?? {};
+      if (res.status !== 200 || !top.settings || typeof top.settings !== 'object') continue;
+      const d = { label: key, type: w.type, id: w.id, settings: top.settings, where: w.where, custom: { css: top.custom_css, js: top.custom_js } };
+      out.push(d);
+      named(d);
+    }
   }
   return out;
+}
+
+/* The pages' Upsell blocks (an upsell is its own design since 04-11-2026; /docs/upsells_global_settings → "Where an
+ * upsell shows"): [the page design type, the block, the upsell type it takes]. A block picks its upsell — and in an
+ * A/B test a second — in `{block}_upsell_ids`: `0` is the type's system upsell, `""` none, a third id never read. */
+const UPSELL_BLOCKS = [['product', 'p_upsell', 'product'], ['cart', 'cart_upsell', 'cart'], ['checkout', 'checkout_upsell', 'checkout'],
+  ['thankyou', 'upsell_settings', 'thankyou']];
+/* Each type's looks, the first its default (the plugin's `UpsellsModel_cl::TYPE_DEFS`); a cart upsell in one of the
+ * cart's pop-ups (`after_add`, `before_checkout`) always shows the cards (`UpsellsLayouts_cl::lookForSettings()`). */
+const UPSELL_LOOKS = { product: ['cards', 'ticks', 'bought_together'], cart: ['cards', 'ticks'], checkout: ['cards', 'ticks'], thankyou: ['thankyou'] };
+
+function upsellLook(type, s) {
+  const looks = UPSELL_LOOKS[type] ?? [];
+  if (looks.length < 2) return looks[0] ?? '';
+  if (type === 'cart' && ['after_add', 'before_checkout'].includes(String(s.look_placement ?? ''))) return 'cards';
+  return looks.includes(String(s.look_layout ?? '')) ? String(s.look_layout) : looks[0];
+}
+
+/**
+ * The upsells a shopper meets: each switched-on Upsell block's picked upsell(s), read from the upsells design. `0` is
+ * the type's system upsell — the plugin's lowest-id one of that preset (`UpsellsModel_cl::getSystemDesignId()`), seen
+ * through the api as the lowest `is_system` upsell of that `instance_type`. An id that is gone or of another type is
+ * left out, as the plugin leaves it out. `legacy` names a design that still carries its upsell itself (a plugin before
+ * the upsells design: the store then fetches an older copy of this skill, so it is reported, not read). A block
+ * switched on that shows no upsell adds nothing: the feature check then counts nothing to offer.
+ */
+async function readPickedUpsells(call, R, designs) {
+  const out = { picked: [], legacy: [], unread: null };
+  if (!designs.some((d) => UPSELL_BLOCKS.some(([t, b]) => d.type === t && `${b}_upsell_ids` in d.settings))) {
+    for (const d of designs) if (d.type === 'product' && yes(d.settings.p_upsell_is_active)) out.legacy.push(`${d.label}.p_upsell`);
+    return out;
+  }
+  const list = await walk(call, `${pathFor('section_manager_instances', 'section_manager/instances', R)}?type=upsells`);
+  if (list.error) { out.unread = `could not read the upsells list — ${list.error}`; return out; }
+  const typeOf = new Map(list.rows.map((r) => [Number(r.id), String(r.instance_type ?? '')]));
+  const system = {};
+  for (const r of [...list.rows].sort((a, b) => Number(a.id) - Number(b.id))) {
+    if (String(r.is_system) === 'yes' && !(r.instance_type in system)) system[r.instance_type] = Number(r.id);
+  }
+  const gsPath = pathFor('section_manager_global_settings', 'section_manager/global_settings', R);
+  const read = new Map();
+  for (const [pageType, block, type] of UPSELL_BLOCKS) {
+    for (const d of designs.filter((x) => x.type === pageType)) {
+      const s = d.settings;
+      if (!yes(s[`${block}_is_active`])) continue;
+      if (!(`${block}_upsell_ids` in s)) { out.legacy.push(`${d.label}.${block}`); continue; }
+      const raw = String(s[`${block}_upsell_ids`] ?? '').split(',').map((x) => x.trim()).filter((x) => x !== '').slice(0, 2);
+      const ids = [...new Set(raw.map((x) => (Number(x) > 0 ? Number(x) : system[type] ?? 0)))].filter((id) => id > 0 && typeOf.get(id) === type);
+      for (const id of ids) {
+        if (!read.has(id)) {
+          const res = await call(`${gsPath}/upsells/${id}`);
+          const top = res.body?.data ?? res.body ?? {};
+          read.set(id, res.status === 200 && top.settings && typeof top.settings === 'object' ? top : { error: `HTTP ${res.status}` });
+        }
+        const top = read.get(id);
+        if (top.error) { out.unread = `upsells/${id} (picked by ${d.label}) could not be read (${top.error})`; continue; }
+        out.picked.push({ block, page: d.label, id, label: `upsells/${id}`, type, look: upsellLook(type, top.settings),
+          settings: top.settings, styleGen: top.style_generator ?? {}, custom: { css: top.custom_css, js: top.custom_js },
+          where: [`${d.label} \`${block}_upsell_ids\``] });
+      }
+    }
+  }
+  return out;
+}
+
+/** One setting on every upsell a switched-on block shows in one of `looks` — the upsell twin of probe(). */
+function upsellProbe(ctx, key, looks) {
+  const r = { on: false, seen: [], missing: [], designs: 0 };
+  for (const u of ctx.upsells?.picked ?? []) {
+    if (!looks.includes(u.look)) continue;
+    r.designs++;
+    if (!(key in u.settings)) { r.missing.push(`${u.label}.${key}`); continue; }
+    r.seen.push(`${u.label}.${key} = ${JSON.stringify(u.settings[key])} (${u.page} \`${u.block}\`)`);
+    if (yes(u.settings[key])) r.on = true;
+  }
+  return r;
 }
 
 function checkSameKindLooks(listDesigns) {
@@ -2933,6 +3109,11 @@ async function main(base) {
     }
   }
 
+  /* Every design a shopper meets beyond the store row's — placed on a page or in a custom block, or named by another
+   * design — and the upsells the pages' blocks pick: read once, for the checks below. */
+  const shown = await shownDesigns(call, R, designs, pagesRead, cb.rows ?? [], productsRead);
+  const upsells = await readPickedUpsells(call, R, designs);
+
   /* ── the card designs: the header's height and stuck state, and every coloured band ─────────── */
   const presetsRead = await walk(call, pathFor('design_controls_presets', 'design_controls/presets', R));
   if (presetsRead.error) {
@@ -2986,11 +3167,13 @@ async function main(base) {
       passed.push('cards in a list do not touch');
     }
 
-    const panels = checkPopupPanels(designs, presetsById, resolve);
+    const upsellPopups = upsells.picked.map((u) => ({ label: `${u.label} (picked by ${u.page} \`${u.block}\`)`, upsell: true,
+      settings: u.settings, styleGen: u.styleGen }));
+    const panels = checkPopupPanels([...designs, ...upsellPopups], presetsById, resolve);
     problems.push(...panels);
     /* Every list design a shopper meets — the store's own and those a page or a template names — for the drawer
      * and card-look checks. Measured: the cramped drawer was on a listing reached only through the category page. */
-    const listDesigns = [...designs, ...await shownListDesigns(call, R, designs, pagesRead, cb.rows ?? [])];
+    const listDesigns = [...designs, ...shown];
     notes.push(...checkFilterDrawers(listDesigns, presetsById));
     notes.push(...checkSameKindLooks(listDesigns));
   }
@@ -3039,7 +3222,7 @@ async function main(base) {
   } else {
     const byType = (type) => designs.filter((d) => d.type === type);
     const clock = { zone: me.body.timezone, offset: me.body.utc_offset };
-    const features = await reconcileFeatures(call, R, { designsOf: byType, store, clock }, recorded, productsRead);
+    const features = await reconcileFeatures(call, R, { designsOf: byType, store, clock, upsells }, recorded, productsRead);
     problems.push(...features.problems);
     notes.push(...features.notes);
     // Zero reconciled is not a match: every key was unknown, unreadable or unmapped, and the notes say which.
@@ -3096,12 +3279,19 @@ async function main(base) {
   notes.push(...leftovers.notes);
 
   /* ── the custom code, listed for review ──────────────────────────────────────────────────────── */
-  const code = listCustomCode(store, designs, pagesRead, productsRead);
+  /* An upsell picked by several blocks is one design: listed once, with every place that shows it. */
+  const upsellDesigns = new Map();
+  for (const u of upsells.picked) {
+    if (!upsellDesigns.has(u.label)) upsellDesigns.set(u.label, { label: u.label, custom: u.custom, where: [] });
+    upsellDesigns.get(u.label).where.push(...u.where);
+  }
+  const code = listCustomCode(store, [...designs, ...shown, ...upsellDesigns.values()], pagesRead, productsRead);
   if (!code.readable) {
     notes.push('custom code was NOT listed: this key cannot read it (the custom-code access on the key\'s form).');
   } else if (code.pieces.length) {
     notes.push(`${code.pieces.length} piece(s) of custom code run on this store — review each one:\n` +
-      code.pieces.slice(0, 15).map((p) => `        ${p}`).join('\n') + (code.pieces.length > 15 ? `\n        … and ${code.pieces.length - 15} more` : '') + '\n' +
+      /* Every piece, never a first few: the note asks for each one to be reviewed. */
+      code.pieces.map((p) => `        ${p}`).join('\n') + '\n' +
       '    A setting or a card design that does the same replaces it; CSS aimed inside a design nested in another does\n' +
       '    nothing (joins.js reports it as dead-scoped-css); custom JS never stands in for a feature that changes what a\n' +
       '    shopper sees — order, price, stock — report that gap instead. Check pages with custom layout CSS at 768 and\n' +
