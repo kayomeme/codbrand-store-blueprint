@@ -3295,7 +3295,7 @@ async function main(base) {
       '    A setting or a card design that does the same replaces it; CSS aimed inside a design nested in another does\n' +
       '    nothing (joins.js reports it as dead-scoped-css); custom JS never stands in for a feature that changes what a\n' +
       '    shopper sees — order, price, stock — report that gap instead. Check pages with custom layout CSS at 768 and\n' +
-      '    1200 too, not only 390 and 1440. references/review-the-tools.md → custom code says how to classify each.');
+      '    1200 too, not only 390 and 1440. references/check-store.md → custom code says how to classify each.');
   }
 
   /* ── stock shown where no stock is counted ───────────────────────────────────────────────────── */

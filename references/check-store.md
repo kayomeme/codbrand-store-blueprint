@@ -1,6 +1,6 @@
 # Reviewing the tools after a build
 
-Read this ONLY when the user writes **review the tools**. It is optional and not part of building a
+Read this ONLY when the user writes **check store**. It is optional and not part of building a
 store. It turns what went wrong, or slowly, during this build into precise feedback for the CodBrand
 team, who build this skill, `codbrand-content-builder` and the store's api (`cl-api/v1`). The goal is
 to improve the TOOLS for every store, not this store.
@@ -35,13 +35,15 @@ Improving a skill's own steps, checks and scripts is not a feature: it makes an 
 
 ## Where reports are kept, and the earlier ones
 
-Every review ends in ONE file in **`review-the-tools-reports/`**, at the root of the project you are
-working in, or in the folder the user names for reports. Its name is the store's domain and the date
+Every review ends in ONE file, in the folder the project's own standing instructions (the file your assistant reads at
+the start of every session) name for these reports; if they name none, in **`check-store-reports/`** at the root of the project you are working
+in; or in the folder the user names. Its name is the store's domain and the date
 the report is written: **`{domain}-{DD-MM-YYYY}.md`**, the domain without `https://` or `www.`, for
 example `shop.example.com-30-09-2026.md`. If that name is taken, add `-2`, `-3`. Never write the API
 key, or any other secret, into a report.
 
-**Before your first reply, read the latest earlier report for this domain**: the most recent by the
+**Before your first reply, read the latest earlier report for this domain** (a project may also hold older ones in
+`review-the-tools-reports/`, this procedure's former folder — read those too): the most recent by the
 date in its name. Of this domain's reports, read only that one: each report carries forward what was
 still open, so the latest one holds the history. If the folder also holds other domains' reports, read the summary table
 of each one's latest report too: a gap in the tools is the same on every store. These are local
@@ -227,5 +229,5 @@ skills and have never seen this store:
 10. **Checked and not confirmed:** points that did not hold up, one line each with the reason.
 11. **Honesty notes:** what you could not verify, and which conclusions are inferences.
 
-Save it as `review-the-tools-reports/{domain}-{DD-MM-YYYY}.md` (see "Where reports are kept"), never
+Save it as `{domain}-{DD-MM-YYYY}.md` in the reports folder (see "Where reports are kept"), never
 over an earlier report, and give the user the path.
