@@ -195,3 +195,19 @@ proof — reviews, real photography, real detail.
 
 Avoid the generic-template smell: stock imagery with no relationship to the products, claims with no
 specifics, and a hero that says nothing a competitor could not also say.
+
+## Asking, and filling what you were not told — the detail
+
+Moved here verbatim from `SKILL.md` → "Asking" (14-11-2026).
+
+**"Do not run a questionnaire" does NOT mean "write the questionnaire as prose", and a live run made
+exactly that mistake** — it opened with four numbered questions, each a paragraph, and asked the
+merchant to compose answers to all of them at once. That is the same interrogation with the
+structure taken away: more to read, nothing to click, and four chances to answer the wrong thing.
+What the rule is actually against is making someone feel AUDITED. A wall of prose does that better
+than a form.
+
+| | fill with | why |
+|---|---|---|
+| **contact identifiers** — phone, email, address, handles | an obvious placeholder: `+212 6XX XXX XXX`, `contact@yourstore.ma` | an invented-but-plausible number is **somebody's actual number**, and a merchant who forgets sends customers to a stranger. A placeholder is also visibly unfilled, so they can SEE what to change |
+| **policy values** — return days, delivery time, shipping cost | the market norm, stated plainly (`14 days`) | a norm is not a claim about them, and it reads fine if left |

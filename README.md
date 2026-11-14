@@ -30,3 +30,12 @@ Those tags stay here. No tag is ever moved.
 
 The default branch, or a newer release, may describe doors or behaviour this store does not have.
 Following it produces calls that fail, or markup that validates locally and then does not render.
+
+## It needs a second skill: `codbrand-content-builder`
+
+This skill decides what the store should be; **`codbrand-content-builder`** turns each page and custom block into
+native WordPress blocks. It is a separate skill with its own repository,
+[`kayomeme/codbrand-content-builder`](https://github.com/kayomeme/codbrand-content-builder), installed the same way
+as this one: its `SKILL.md` from the plugin, its folders from that repository at the **same tag** (every release
+tags both). Without it a build stops at the content step, and the skill's preflight check says so before anything
+is built.

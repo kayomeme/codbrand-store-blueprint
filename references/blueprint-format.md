@@ -19,7 +19,7 @@ else here: ask the API, do not guess around it — see `api-recipes.md`.
 because the brand reads Caregiver"*. It never says *"call `PATCH /design_controls/color_palette/4`"*.
 
 If you find yourself writing an endpoint into a blueprint, you have crossed the line this whole skill
-exists to hold — see `SKILL.md` → "What this skill does not do".
+exists to hold — see `SKILL.md` → "What this skill does, and does not".
 
 ## Shape of the document
 
@@ -94,7 +94,7 @@ record what it was:
 
 When a decision was taken **to match the reference**, say so in its `why` and name what the reference
 shows, so a later fix can see what it would be undoing. A reversal also re-opens the page it touches:
-re-run the browser pass there (`SKILL.md` → "Phase 10's browser pass").
+re-run the browser pass there (`order-of-work.md` → "Phase 10's browser pass").
 
 `handover.mjs` refuses a `reversed` without `from`, a `why` of a real sentence, and a `date`. It checks
 only what the blueprint records: a setting flipped on the store without touching the blueprint leaves

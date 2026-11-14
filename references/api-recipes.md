@@ -151,7 +151,7 @@ translatable settings were still English, including "Add to cart" on the main bu
 
 ⚠️ **The `langue_code` translation pack is WordPress's, not ours.** Setting `ar` installs the
 Arabic pack, which translates core and the theme. This plugin ships no `.pot`
-and no `.mo` or `.po` in any language, so no pack ever reaches the 57 above. If that changes and
+and no `.mo` or `.po` in any language, so no pack ever reaches the 56 above. If that changes and
 translation files start shipping, this whole section shrinks to nothing — re-measure rather than
 trusting the counts.
 
@@ -479,7 +479,7 @@ The docs cannot tell you the following:
   says what), and a small store has nothing to hide from search.
 - **The whole-site switch is a different thing.** `noindex` above is one page's setting;
   `discourage_search_engines` (WordPress's "Discourage search engines") hides every page at once. You
-  change it only when the merchant asks: SKILL.md rows 0 and 10, and `/docs/store_settings` → "Hiding
+  change it only when the merchant asks: `order-of-work.md` rows 0 and 10, and `/docs/store_settings` → "Hiding
   the whole site from search engines".
 - **Check the store's `country_code`** on `stores`. Until it is set, product pages give search engines
   and link previews no price at all, whatever the seo design says.
@@ -910,3 +910,113 @@ the judgement in the chrome actually lives.
 Two things this table is not saying. It is not a licence to leave anything at its default — "off" is a
 decision you make and record, "default" is one you did not. And it is not a substitute for a reference
 site: if the merchant named one, the measured values win over every row above.
+
+## The detail behind SKILL.md's rules
+
+Moved here verbatim from `SKILL.md` (14-11-2026); its rules keep a line there.
+
+### Tools: WordPress core REST, sourced imagery, fetching vs driving a browser
+
+⚠️ **Two honest limits on WP core REST.** It needs a WordPress **Application Password** — a *larger*
+grant than this store's API key, full account access at that user's level — so ask, never assume. And
+it **cannot activate a theme**: `/wp/v2/themes` is read-only in core.
+
+⚠️ **Sourced imagery is not equally acceptable everywhere on the store.** Hero, lifestyle,
+category tiles and backgrounds may come from any permissively-licensed source. **Product photos
+may not.** A COD customer pays cash *at the door*, so a photo of something the box does not
+contain is not a refund — it is a refusal, and the merchant pays the outbound leg, the return leg
+and the lost sale. Product shots are the merchant's own, or the supplier's photos of that exact product;
+a generated picture stands in only for a placeholder product you invented, never for a real one.
+Either way the bytes end up in this store's own library: download and upload, never leave a page
+pointing at someone else's server. Detail in `references/pages.md`.
+
+⚠️ **READING a page is a FETCH job. Only DRIVE a browser when a fetch cannot answer the question.**
+Use whatever browsing you already have and are already permitted to use — this skill does not care
+which, and you should not ask the merchant to install or switch anything. What it does care about is
+how OFTEN you make them approve something. On many setups each browser action on a site raises its
+own approval prompt; a fetch raises none. So when they point you at a reference store, a competitor
+or a docs page and you only need its TEXT, STRUCTURE or IMAGES — fetch it. Reach for a browser only
+for what a fetch genuinely cannot give: how something RENDERS, layout at a real viewport,
+interaction, or looking at the store you just built.
+
+**Do not assume batching saves them approvals.** On some tools the permission check runs per action
+even inside a batch, so ten batched clicks are still ten prompts. Batching saves round-trips; it does
+not reliably save clicks. The one thing that always reduces prompts is needing the browser less.
+
+**When you DO need it, ask ONCE and up front.** Name every site you will open, in a single message,
+before you start — not scattered across an hour of work. Then do that browsing in one contiguous
+block. A merchant who approves a known burst is in a completely different position from one being
+interrupted every few minutes by a prompt they cannot predict.
+
+And if a request is refused: **stop and say so.** Never silently retry, and never quietly drop the
+check it was for — say which verification you could not do, exactly as the census row in `SKILL.md` → "Know what tools YOU have" requires.
+
+### preflight's two flags
+
+**The script refuses to start without both flags, deliberately.** They are not paperwork:
+
+| flag | what it decides | why it cannot be inferred |
+|---|---|---|
+| `--country` | where the **seller** is | — |
+| `--market` | where the **customer** is | Consumer obligations usually follow the customer, so one question would silently pick the wrong jurisdiction for a cross-border seller. Pass the same value twice when they match. |
+
+### The theme
+
+`GET /me` reports the active `theme`:
+
+| theme | |
+|---|---|
+| `codbrand` | **the plugin's own theme, and the one to recommend.** Every store this skill has been built and tested on runs it. It styles no fonts, headings, buttons or colours, so what you set is what the page shows |
+| `astra` | works, but it styles headings, buttons and body text itself, so it can override some of what you set |
+
+Treat any other theme as unverified, not as wrong.
+
+**On `codbrand` there is nothing to say: build.** On any other theme, **say so before you design anything**:
+
+> Your site is running *{theme}*. This storefront is built for Codbrand, the plugin's own theme, which
+> leaves all styling to the store. *{theme}* styles headings, buttons and body text itself, so some
+> of what I set may be overridden. I can install Codbrand for you, since it comes with the plugin;
+> switching changes every page a visitor sees, so I will ask before I turn it on.
+
+Then **carry on and build anyway.** This is a warning, not a blocker — a store on another theme still
+comes out mostly right. But raising it at the end is useless: by then they would have to redo the
+work.
+
+#### You CAN install the plugin's own companion theme — offer it
+
+The plugin ships a minimal storefront theme inside itself, and there is a door for it:
+
+| call | scope | |
+|---|---|---|
+| `GET theme` | `read` | what is bundled vs what is installed, plus `site_has_content` |
+| `POST theme/install` | `write` | installs or updates it. Does **not** activate |
+| `POST theme/activate` | `write` | **requires `{"confirm": true}`** — without it you get a `422`, by design |
+
+**Install and activate are separate on purpose, and you must keep them separate.** Activating changes
+every page a visitor sees. **Read `site_has_content` from `GET theme` first: when it is true, ask the
+merchant before confirming** — the door's own `422` says exactly this. Never fold activation into
+another step, and never confirm on the merchant's behalf.
+
+Two real limits:
+
+- **It covers only THAT theme.** No door installs Astra or any other theme, and WordPress core's own
+  `/wp/v2/themes` is **read-only**, so nothing can switch a site to an arbitrary theme for them. If
+  they want Astra, that one is genuinely theirs to act on.
+- **The door is addon-owned**, so it is absent when that addon is deactivated. **Check `/me` for
+  `theme`** rather than assuming — if it is not listed, say so instead of calling it.
+
+### Literal ids and look-alike components — the measured cases
+
+- **Never write a literal id.** Look the NAME up through `design_controls/icons_manager` and use the
+  id it returns. Two separate defects on this plugin's own demo store came from literal ids: one
+  inherited `12` (which is `phone`) onto a *Specifications* accordion, and one wrote `17`, which does
+  not exist, so the control rendered with no icon and nothing reported it. Opposite mistakes, one
+  cause — **the id was never resolved to a meaning**.
+
+**Components follow the same rule: one design each, styled once.** Reviews, product grids, categories
+— each renders through the design its store points at (`GET stores` → `renders`), on every page that
+places its `cl/…` block; one you create shows only once the store points at it. Style that design to the reference — its look, not
+only its words — and place the block wherever the component appears. Never hand-build a look-alike
+in page markup: it freezes the data and splits the look into copies no setting reaches. Measured on
+one build: typed review cards on three pages said "based on 247 reviews" while the store held 31, and
+the real reviews design had kept every shipped style.
