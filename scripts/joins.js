@@ -6,12 +6,16 @@
  * **Zero findings is the pass.** A finding you decide is right for this design needs a reason, in
  * your report, per finding.
  *
- * Run it on every page you changed, at 1440×900 and 390×844, and on a page with collapsibles (a size
+ * Run it on every page you changed, at 1440×900, 768×1024 and 390×844, and on a page with collapsibles (a size
  * guide, an order summary, an FAQ) ONCE WITH EVERY ONE OPEN AND ONCE WITH EVERY ONE CLOSED — a closed
  * block draws its borders somewhere else than an open one. It reads `open_collapsibles` back to you so
  * you can see which state you measured. Then once more with each overlay open (the cart drawer, the
  * checkout popup, a quick view): what an overlay holds is checked only while it is open. Set
- * `window.CL_JOINS_RHYTHM = { stack, section }` first, the store's two spacing steps, for off-rhythm.
+ * `window.CL_JOINS_RHYTHM = { stack, section, edge }` first — the store's two spacing steps and its edge
+ * inset at this width (references/palette.md → "Density") — for off-rhythm and edge-mismatch. And name what
+ * you measure: `window.CL_JOINS_PAGE` = "home", "category", "product", "cart" or "checkout", and with an
+ * overlay open `window.CL_JOINS_OPEN` = "quick view", "cart drawer" or "checkout popup". Save each result it
+ * prints as a .json file in one folder: `handover.mjs --joins <folder>` reads them, and fails without them.
  *
  * WHAT IT FLAGS — each one survives every per-setting check and every screenshot of a block alone:
  *
@@ -22,13 +26,15 @@
  *                       seam: a lower box's own divider with clear space on both sides of it, and a box
  *                       that paints nothing on the seam and keeps its visible content away from it — 8px
  *                       below a box, 24px above one.
- *   touching-cards      cards of one list — siblings of one kind, each drawing its own box, 80×60px or
- *                       more — with 0px between them, side by side or one under the next: a grid or a
- *                       slider whose gap is 0. Measured: review cards touching in a row of three and in a
- *                       slider for a month, while every other check passed.
+ *   touching-cards      cards of one list — siblings of one kind, each drawing its own box (a background, a
+ *                       shadow or borders on both sides; a row drawing only a line above or below is a row,
+ *                       not a card), 80×60px or more — with 0px between them, side by side or one under the
+ *                       next: a grid or a slider whose gap is 0. Measured: review cards touching in a row of
+ *                       three and in a slider for a month, while every other check passed.
  *   stacked-dividers    two horizontal rules (a top/bottom border with no side borders, or an <hr>)
  *                       within 24px of each other, from two different boxes — or a rule within 12px of
- *                       a bordered box's edge. Two bordered cards 16px apart are a list, not this. Measured:
+ *                       a bordered box's edge. Two bordered cards 16px apart are a list, not this, and a
+ *                       control drawn as a box (a button, a pill, a field) is no line at all. Measured:
  *                       a toggle's bottom rule, then a summary header's top AND bottom rules, then the
  *                       form's border: four lines in under 100px, each block styled as if alone.
  *   browser-default     a heading whose margin or weight, or a link whose colour, comes from the
@@ -66,6 +72,21 @@
  *                       aimed at their cards' photo gallery (a 4:5 photo, image cover, the full-screen button,
  *                       the arrows' look and hover) — the gallery is a slider design of its own, and not one
  *                       of the 15 ever applied.
+ *   edge-mismatch       the header, the breadcrumb trail, the page's title and the footer not starting their
+ *                       content at one distance from the window's edge (±2px) — the header's; with
+ *                       CL_JOINS_RHYTHM.edge, the header at that inset on a phone and never nearer the window
+ *                       on a wider screen. Content inside a painted box narrower than the window starts where
+ *                       the box does. Measured on one store at 1440: header 72px, trail 48px, title 64px.
+ *   glued-to-line       text whose line sits under 8px from a line another block draws. Measured: a trail
+ *                       2px under the header's bottom line.
+ *   side-gap            inside the cards of a list, under 8px between a card's photo and its text (Material's
+ *                       card pads its text 16dp). Measured: a product title 5px under its photo.
+ *   low-contrast        text under WCAG 1.4.3's 4.5 : 1 (3 : 1 for 24px, or 18.5px bold) against what is painted
+ *                       behind it. Text over a photo or a gradient is not judged; logos and disabled controls
+ *                       are WCAG's exceptions. Measured: a quick view's text near-white on its white panel, 1.12 : 1.
+ *   overflow            the page wider than the window or a block past its edge (WCAG 1.4.10), a control past
+ *                       its card, text past its box, a word broken mid-word across two lines. Measured at 768:
+ *                       card buttons out of their cards, product names cut mid-word.
  *
  * A collapsible is a <details>, a block whose header toggles it with aria-expanded, or this plugin's own
  * toggle: an element carrying is_open="yes|no" whose first child is its header. To measure them open,
@@ -270,12 +291,16 @@
   // together into one panel and is reported here. Big enough to be a card: a joined row of buttons or
   // chips (a segmented control) is a design, not this. One finding per list.
   const seamAt = (x, y) => reported.some((s) => [x, y].every((e) => [s.a.el, s.b.el].some((o) => o === e || o.contains(e) || e.contains(o))));
+  // A card draws a BOX: a background the eye sees, a shadow, or borders on both sides. A row that draws only a line
+  // above or below it is a row of a list or a table, and rows meet by design. Measured on one store: a price list's
+  // rows, each with only a 1px bottom border, and a partners table's rows with only a top one, reported as cards.
   const drawsBox = (el) => {
     const cs = getComputedStyle(el);
-    return ['Top', 'Right', 'Bottom', 'Left'].some((s) => edge(cs, s)) || !!shadowEdge(cs) || visiblePaint(el, cs);
+    return !!(edge(cs, 'Left') && edge(cs, 'Right')) || !!shadowEdge(cs) || visiblePaint(el, cs);
   };
   const kindOf = (el) => `${el.tagName}.${typeof el.className === 'string' ? el.className.trim().split(/\s+/)[0] || '' : ''}`;
   const overlapY = (a, b) => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+  const cardLists = []; // every list of two or more cards of one kind, for side-gap and overflow below
   for (const list of new Set(qa('body *').map((el) => el.parentElement).filter(Boolean))) {
     const byKind = new Map();
     for (const c of Array.from(list.children)) {
@@ -286,6 +311,7 @@
     }
     for (const cards of byKind.values()) {
       if (cards.length < 2) continue;
+      cardLists.push({ list, cards });
       const pairs = [];
       for (let i = 0; i < cards.length; i++) {
         for (let j = i + 1; j < cards.length; j++) {
@@ -309,9 +335,21 @@
   // A DIVIDER is a top or bottom border on a box with no side borders (a rule across the page). A box
   // bordered on its sides has an OUTLINE: two outlined cards 16px apart are a list, not stacked
   // dividers — an outline counts only when a divider lies directly on it.
+  // A CONTROL drawn as a box — a button, a pill, a field — is not a rule: its outline is the control's shape. Up to 64px
+  // tall, and a control by its tag or role, by its pointer, or by its pill shape (a radius of nearly half its height).
+  // Measured on one store: an outlined 48px "Where to buy" pill (a <span>, radius 999px) 10px from its table's row
+  // lines, reported as stacked dividers on every partner row.
+  const controlBox = (el, r) => {
+    if (r.height > 64) return false;
+    const cs = getComputedStyle(el);
+    return /^(A|BUTTON|INPUT|SELECT|TEXTAREA|LABEL|SUMMARY)$/.test(el.tagName)
+      || /^(button|link|tab|switch|checkbox|radio|option|menuitem)$/.test(el.getAttribute('role') || '')
+      || cs.cursor === 'pointer' || parseFloat(cs.borderTopLeftRadius) >= r.height * 0.45;
+  };
   const lines = [];
   for (const b of boxes) {
     if (b.r.height < 24) continue; // a chip or an input: its own top and bottom are not dividers
+    if (controlBox(b.el, b.r)) continue;
     const kind = b.sides ? 'outline' : 'divider';
     if (b.top) lines.push({ y: b.r.top, left: b.r.left, right: b.r.right, el: b.el, side: 'top', kind });
     if (b.bottom) lines.push({ y: b.r.bottom, left: b.r.left, right: b.r.right, el: b.el, side: 'bottom', kind });
@@ -439,9 +477,9 @@
     const bestPerCss = perCss * (largest / fileW);
     const name = src.split('/').pop().split('?')[0].slice(0, 60);
     if (perCss < 0.75 * dpr) {
-      flag('soft-image', describe(img), `"${name}": a ${fileW}px file drawn ${round(r.width)}×${round(r.height)} gives ${perCss.toFixed(2)} file pixels per CSS pixel, below the ${0.75 * dpr} this ${dpr}× screen needs — serve a larger file`);
+      flag('soft-image', describe(img), `"${name}": a ${fileW}px file drawn ${round(r.width)}×${round(r.height)} gives ${(Math.floor(perCss * 100) / 100).toFixed(2)} file pixels per CSS pixel, below the ${0.75 * dpr} this ${dpr}× screen needs — serve a larger file`);
     } else if (bestPerCss < 1.5) {
-      flag('soft-image', describe(img), `"${name}": the largest file offered (${largest}px) gives ${bestPerCss.toFixed(2)} file pixels per CSS pixel drawn ${round(r.width)}px wide — soft on a 2× phone; upload the photo at least ${Math.ceil(1.5 * largest / bestPerCss)}px wide`);
+      flag('soft-image', describe(img), `"${name}": the largest file offered (${largest}px) gives ${(Math.floor(bestPerCss * 100) / 100).toFixed(2)} file pixels per CSS pixel drawn ${round(r.width)}px wide — soft on a 2× phone; upload the photo at least ${Math.ceil(1.5 * largest / bestPerCss)}px wide`);
     }
   }
 
@@ -682,6 +720,281 @@
     }
   }
 
+  // ── the page's text, read once for the five checks below ──────────────────────────────────────
+  // Every text with a letter or a digit that a shopper can see (not out of sight, not in a closed drawer), with the
+  // boxes its lines draw: each as tall as the font (its ascent and descent), not as the line — the line's extra
+  // leading is outside it. What these checks measure from, as a person measuring the page would.
+  const hiddenMemo = new Map();
+  const hidden = (el) => {
+    if (!hiddenMemo.has(el)) hiddenMemo.set(el, unseen(el) || inClosedPanel(el));
+    return hiddenMemo.get(el);
+  };
+  const texts = [];
+  {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const el = n.parentElement;
+      if (!el || !/[\p{L}\p{N}]/u.test(n.nodeValue) || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|OPTION|TITLE)$/.test(el.tagName) || hidden(el)) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+      if (rects.length) texts.push({ node: n, el, rects });
+    }
+  }
+  const rtl = getComputedStyle(document.body).direction === 'rtl';
+  const startOf = (r) => (rtl ? W - r.right : r.left); // from the window's start edge: left, or right in RTL
+  const media = qa('img, svg, video, picture').filter((m) => !(m.parentElement && m.parentElement.closest('svg')) && !hidden(m));
+  // Centred content keeps no edge: its own text centred, or its parent centring it.
+  const centred = (el) => {
+    if (getComputedStyle(el).textAlign === 'center') return true;
+    const p = el.parentElement && getComputedStyle(el.parentElement);
+    return !!(p && /flex|grid/.test(p.display) && /center/.test(`${p.justifyContent} ${p.justifyItems}`));
+  };
+
+  // ── edge-mismatch ─────────────────────────────────────────────────────────────────────────────
+  // The header, the breadcrumb trail, the page's title and the footer stack on every page: their content starts at
+  // one distance from the window's edge — the header's — and, given the store's edge inset (`CL_JOINS_RHYTHM.edge`,
+  // palette.md → "Density"), at that inset on a phone and never closer to the window on a wider screen (a boxed
+  // page adds its margin there). Centred content keeps no edge; a part with something beside it on its start side
+  // (a product's title right of its photos) does not start a row and is not compared. Measured on one store at
+  // 1440: header 72px, trail 48px, title 64px, and 0 findings from every other check there.
+  const edgeWant = Number(window.CL_JOINS_RHYTHM && window.CL_JOINS_RHYTHM.edge) > 0 ? Number(window.CL_JOINS_RHYTHM.edge) : null;
+  // The first part shown for each selector, in order; outside the header (a theme may put the site's name in an h1).
+  const firstOf = (sels, outside) => {
+    for (const sel of sels) { const el = qa(sel).find((x) => !hidden(x) && !(outside && outside.contains(x))); if (el) return el; }
+    return null;
+  };
+  const header = firstOf(['[cl-compo="header"][cl-block="main_header"]', 'header', '[role="banner"]']);
+  // Content inside a painted box narrower than the window (a hero panel, a bar as wide as the page) starts where that
+  // box starts: the box's own padding insets its text, as a band's must. Measured on one store: a home title 113px
+  // in, inside a dark panel standing on the 48px edge with 64px of padding.
+  const panelMemo = new Map();
+  const panelOf = (el) => {
+    if (!panelMemo.has(el)) {
+      let found = null;
+      for (let a = el; a && a !== document.body; a = a.parentElement) {
+        const r = box(a);
+        if (r.left > 1 && r.right < W - 1 && drawsBox(a)) found = r;
+      }
+      panelMemo.set(el, found);
+    }
+    return panelMemo.get(el);
+  };
+  const startIn = (root) => {
+    let best = null;
+    const take = (el, r) => { const at = panelOf(el) || r; if (!centred(el) && (!best || startOf(at) < startOf(best.r))) best = { el, r: at }; };
+    for (const t of texts) if (root.contains(t.el)) for (const r of t.rects) take(t.el, r);
+    for (const m of media) {
+      const r = box(m);
+      if (root.contains(m) && r.width < W * 0.9 && r.width > 0) take(m, r);
+    }
+    return best;
+  };
+  const parts = [
+    ['the header', header],
+    ['the breadcrumb trail', firstOf(['[cl-compo="breadcrumb"]', 'nav[aria-label*="readcrumb" i]', '.woocommerce-breadcrumb', '.breadcrumbs', '.breadcrumb'], header)],
+    ['the page title', firstOf(['h1'], header)],
+    ['the footer', firstOf(['[cl-compo="footer"]', 'footer', '[role="contentinfo"]'], header)],
+  ].filter(([, el], i, all) => el && !all.slice(0, i).some(([, o]) => o && (o === el || o.contains(el))))
+    .map(([name, el]) => ({ name, el, start: startIn(el) })).filter((p) => p.start);
+  // Something outside the part, level with its first content and nearer the start edge: the part is not a row's start.
+  const besideStart = (p) => texts.some((t) => !p.el.contains(t.el) && t.rects.some((r) => overlapY(r, p.start.r) > 0 && startOf(r) < startOf(p.start.r) - 2))
+    || media.some((m) => { const r = box(m); return !p.el.contains(m) && r.width < W * 0.9 && overlapY(r, p.start.r) > 0 && startOf(r) < startOf(p.start.r) - 2; });
+  const rows = parts.filter((p) => !besideStart(p));
+  const side = rtl ? 'right' : 'left';
+  if (rows.length) {
+    const ref = rows[0];
+    const x0 = round(startOf(ref.start.r));
+    for (const p of rows.slice(1)) {
+      const x = round(startOf(p.start.r));
+      if (Math.abs(x - x0) <= 2) continue;
+      flag('edge-mismatch', describe(p.el), `${p.name} starts ${x}px from the ${side} edge, ${ref.name} ${x0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content starts where ${ref.name}'s does`);
+    }
+    if (edgeWant && (phone ? Math.abs(x0 - edgeWant) > 2 : x0 < edgeWant - 2)) {
+      flag('edge-mismatch', describe(ref.el), `${ref.name} starts ${x0}px from the ${side} edge, and the store's edge inset is ${edgeWant}px${phone ? '' : ' (at least that on a wider screen)'} — set its side space to the inset`);
+    }
+  }
+
+  // ── glued-to-line ─────────────────────────────────────────────────────────────────────────────
+  // Text closer than 8px to a line drawn by another box — a divider it does not own: a trail 2px under the header's
+  // bottom line, a heading on a section's rule. Measured between the text's own box (the font's height) and the
+  // line. 8px is the smallest gap Material's card puts between two parts of it (its text block
+  // has 16dp of padding); a box's own text near its own border is that box's padding, not this.
+  const GLUE = 8;
+  const gluedTo = new Map();
+  for (const l of lines.filter((x) => x.kind === 'divider')) {
+    for (const t of texts) {
+      if (l.el.contains(t.el)) continue;
+      for (const r of t.rects) {
+        if (Math.min(r.right, l.right) - Math.max(r.left, l.left) <= 0) continue;
+        const d = r.top >= l.y - 0.5 ? r.top - l.y : r.bottom <= l.y + 0.5 ? l.y - r.bottom : null;
+        if (d === null || d >= GLUE) continue;
+        const g = gluedTo.get(l.el) || { l, d: Infinity, el: null, n: 0 };
+        g.n++;
+        if (d < g.d) Object.assign(g, { d: Math.max(0, d), el: t.el, words: text(t.el).slice(0, 40) });
+        gluedTo.set(l.el, g);
+      }
+    }
+  }
+  for (const g of gluedTo.values()) {
+    flag('glued-to-line', `${describe(g.l.el)} (${g.l.side}) + ${describe(g.el)}`,
+      `"${g.words}" sits ${round(g.d)}px from the line ${describe(g.l.el)} draws${g.n > 1 ? ` (${g.n} line(s) of text under 8px)` : ''} — keep text at least 8px from a line another block draws: give the text's block space on that side`);
+  }
+
+  // ── side-gap ──────────────────────────────────────────────────────────────────────────────────
+  // Inside a card of a list, under 8px between its photo and its text, above, below or beside it — the parts read
+  // as glued. Material's card keeps its text block 16dp in, and 8dp is the least it puts between two parts.
+  // Measured on one store: a product card's title 5px under its photo. One finding per list.
+  for (const { list, cards } of cardLists) {
+    let worst = Infinity;
+    let hit = 0;
+    for (const c of cards) {
+      const photo = qa('img, picture, video', c.el).filter((m) => !hidden(m)).map((m) => ({ m, r: box(m) }))
+        .filter(({ r }) => r.width >= 40 && r.height >= 40).sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height)[0];
+      if (!photo) continue;
+      let gap = Infinity;
+      for (const t of texts) {
+        if (!c.el.contains(t.el) || photo.m.contains(t.el)) continue;
+        for (const r of t.rects) {
+          const p = photo.r;
+          if (overlapX(r, p) > 0) {
+            if (r.top >= p.bottom - 0.5) gap = Math.min(gap, r.top - p.bottom);
+            else if (r.bottom <= p.top + 0.5) gap = Math.min(gap, p.top - r.bottom);
+          } else if (overlapY(r, p) > 0) {
+            if (r.left >= p.right - 0.5) gap = Math.min(gap, r.left - p.right);
+            else if (r.right <= p.left + 0.5) gap = Math.min(gap, p.left - r.right);
+          }
+        }
+      }
+      if (gap < 8) { hit++; worst = Math.min(worst, Math.max(0, gap)); }
+    }
+    if (hit) {
+      flag('side-gap', describe(list), `${hit} of its ${cards.length} cards keep their text ${round(worst)}px from their photo — at least 8px between a card's photo and its text (Material's card: 16dp of padding around its text); pad the card's text block`);
+    }
+  }
+
+  // ── low-contrast ──────────────────────────────────────────────────────────────────────────────
+  // Text whose colour against what is painted behind it misses WCAG 1.4.3: 4.5 : 1, or 3 : 1 for large text (24px,
+  // or 18.5px bold). The background is composited as painted: every see-through layer over the first solid one.
+  // Not judged: text over a photo or a gradient, or in a box placed over the page with nothing solid under the text
+  // inside it (what shows behind is not its ancestors'); logos and disabled controls (WCAG's own exceptions).
+  // Run it with each overlay open (quick view, cart drawer): measured on one store, a quick view's title, price and
+  // button near-white on its white panel, 1.12 : 1, in a drawer every other check skipped.
+  const lin = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  const lumOf = (c) => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  const over = (top, under) => ({ r: top.r * top.a + under.r * (1 - top.a), g: top.g * top.a + under.g * (1 - top.a), b: top.b * top.a + under.b * (1 - top.a), a: 1 });
+  // A box placed over the page that paints (a photo, a colour, a gradient): a cover block's photo and its tint sit
+  // under the text this way, beside it in the markup, not around it.
+  const placed = qa('body *').filter((el) => {
+    const cs = getComputedStyle(el);
+    if (!/^(absolute|fixed)$/.test(cs.position) || hidden(el)) return false;
+    return /^(IMG|VIDEO|PICTURE|CANVAS|SVG)$/i.test(el.tagName) || cs.backgroundImage !== 'none' || (parseColour(cs.backgroundColor) || { a: 0 }).a > 0.05;
+  }).map((el) => ({ el, r: box(el) }));
+  // What the text sits on: its ancestors' backgrounds from the first solid one up, composited. null when that cannot
+  // be read — a photo or a gradient on the way, a box placed over the page with nothing solid under the text inside
+  // it, or a placed painting box under the solid one overlapping the text.
+  const backdrop = (t) => {
+    const layers = [];
+    let solid = document.documentElement;
+    for (let a = t.el; a; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.backgroundImage !== 'none') return null;
+      const c = parseColour(cs.backgroundColor);
+      if (c && c.a > 0.01) layers.push(c);
+      if (c && c.a >= 0.99) { solid = a; break; }
+      if (/^(absolute|fixed)$/.test(cs.position)) return null;
+    }
+    if (placed.some((p) => p.el !== solid && solid.contains(p.el) && !p.el.contains(t.el)
+      && t.rects.some((r) => overlapX(r, p.r) > 0 && overlapY(r, p.r) > 0))) return null;
+    let bg = layers.length && layers[layers.length - 1].a >= 0.99 ? layers.pop() : { r: 255, g: 255, b: 255, a: 1 };
+    while (layers.length) bg = over(layers.pop(), bg);
+    return bg;
+  };
+  const lowContrast = new Map();
+  for (const t of texts) {
+    if (t.el.closest('[class*="logo" i], [id*="logo" i], .site-title, a[rel="home"], :disabled, [aria-disabled="true"]')) continue;
+    const cs = getComputedStyle(t.el);
+    const fg = parseColour(cs.color);
+    if (!fg || fg.a < 0.1) continue;
+    const bg = backdrop(t);
+    if (!bg) continue;
+    const seen = over(fg, bg);
+    const [hi, lo] = [lumOf(seen), lumOf(bg)].sort((a, b) => b - a);
+    const ratio = (hi + 0.05) / (lo + 0.05);
+    const fs = parseFloat(cs.fontSize);
+    const large = fs >= 24 || (fs >= 18.5 && parseInt(cs.fontWeight, 10) >= 700);
+    const need = large ? 3 : 4.5;
+    if (ratio >= need) continue;
+    const k = `${hex(seen)}|${hex(bg)}|${need}`;
+    const g = lowContrast.get(k) || { el: t.el, words: text(t.el).slice(0, 40), seen, bg, ratio, need, n: 0 };
+    g.n++;
+    lowContrast.set(k, g);
+  }
+  for (const g of lowContrast.values()) {
+    flag('low-contrast', describe(g.el), `"${g.words}" is ${hex(g.seen)} on ${hex(g.bg)}, ${(Math.floor(g.ratio * 100) / 100).toFixed(2)} : 1, under the ${g.need} : 1 WCAG 1.4.3 asks for${g.need === 3 ? ' large text' : ''}${g.n > 1 ? ` (${g.n} texts in these colours)` : ''} — change the text's colour or what is behind it`);
+  }
+
+  // ── overflow ──────────────────────────────────────────────────────────────────────────────────
+  // Content out of its box, which no setting reports: (1) the page wider than the window, or a block past the
+  // window's edge (WCAG 1.4.10: nothing scrolls sideways, nothing is lost); (2) a control past its card's edge;
+  // (3) text past its box; (4) a word broken mid-word across two lines (`word-break` / `overflow-wrap`; a word
+  // hyphenated by `hyphens: auto` is not one). Measured on one store at 768: card buttons standing out of their
+  // cards, and product names broken mid-word. A box that clips what overflows it (a slider's track) is skipped.
+  const clipMemo = new Map();
+  const clipsX = (a) => { if (!clipMemo.has(a)) clipMemo.set(a, getComputedStyle(a).overflowX !== 'visible'); return clipMemo.get(a); };
+  const clippedInside = (el, stop) => { for (let a = el.parentElement; a && a !== stop && a !== document.body && a !== document.documentElement; a = a.parentElement) if (clipsX(a)) return true; return false; };
+  const pageW = document.documentElement.clientWidth;
+  const past = qa('body *').filter((el) => {
+    if (SKIP.has(el.tagName.toUpperCase()) && el.tagName !== 'IMG') return false;
+    const r = box(el);
+    if (!(r.right > pageW + 1 || r.left < -1) || r.width === 0 || hidden(el)) return false;
+    if (getComputedStyle(el).position === 'fixed' || clippedInside(el, null)) return false;
+    return true;
+  });
+  const outermost = past.filter((el) => !past.some((o) => o !== el && o.contains(el)));
+  for (const el of outermost.slice(0, 3)) {
+    const r = box(el);
+    flag('overflow', describe(el), `reaches ${r.left < -1 ? `${round(-r.left)}px past the window's left edge` : `${round(r.right - pageW)}px past the window's right edge`} (a ${pageW}px window) — ${document.documentElement.scrollWidth > pageW + 1 ? 'the page scrolls sideways' : 'what is out there is cut off'}; size it to its container`);
+  }
+  for (const { list, cards } of cardLists) {
+    const out = [];
+    for (const c of cards) {
+      if (clipsX(c.el)) continue;
+      for (const k of qa(TAPPABLE, c.el).filter((k) => !hidden(k))) {
+        const r = box(k);
+        if (r.right > c.r.right + 1 || r.left < c.r.left - 1) { out.push(k); break; }
+      }
+    }
+    if (out.length) flag('overflow', describe(list), `in ${out.length} of its ${cards.length} cards a control (${describe(out[0])}) stands past the card's edge — let it shrink or wrap inside the card`);
+  }
+  const blockOf = (el) => { let b = el; while (b && b !== document.body && /^(inline|contents)/.test(getComputedStyle(b).display)) b = b.parentElement; return b; };
+  const textPast = new Map();
+  const broken = new Map();
+  for (const t of texts) {
+    const b = blockOf(t.el);
+    if (b && b !== document.body && !clipsX(b) && !clippedInside(b, null)) {
+      const br = box(b);
+      if (t.rects.some((r) => r.right > br.right + 1 || r.left < br.left - 1) && !textPast.has(b)) textPast.set(b, text(t.el).slice(0, 40));
+    }
+    if (t.rects.length < 2 || getComputedStyle(t.el).hyphens === 'auto') continue;
+    const re = /[\p{L}\p{N}]{4,}/gu;
+    for (let m = re.exec(t.node.nodeValue); m; m = re.exec(t.node.nodeValue)) {
+      const range = document.createRange();
+      range.setStart(t.node, m.index);
+      range.setEnd(t.node, m.index + m[0].length);
+      const tops = Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => r.top);
+      if (tops.length < 2 || Math.max(...tops) - Math.min(...tops) <= 2) continue;
+      const k = kindOf(t.el);
+      const g = broken.get(k) || { el: t.el, word: m[0], n: 0 };
+      g.n++;
+      broken.set(k, g);
+    }
+  }
+  for (const [b, words] of textPast) flag('overflow', describe(b), `"${words}" runs past its box — let the text wrap inside it`);
+  for (const g of broken.values()) {
+    flag('overflow', describe(g.el), `"${g.word}" is broken mid-word across two lines${g.n > 1 ? ` (${g.n} words in such text)` : ''} — a word cut in two reads as two: wrap between words (drop \`word-break: break-all\` / \`overflow-wrap: anywhere\`), or hyphenate with \`hyphens: auto\``);
+  }
+
   // ── dead-scoped-css ───────────────────────────────────────────────────────────────────────────
   // The store prints each design's custom CSS inside `@scope ([cl-design="…"]) to ([cl-design])`: a rule
   // reaches its own design and stops at every design nested in it — a slider design in a listing's card, a
@@ -782,12 +1095,25 @@
   const shownOpen = shownCollapsibles.filter((c) => c.open).length;
   const openCollapsibles = shownOpen;
   const collapsibles = shownCollapsibles.length;
+  // What was measured, for the hand-over gate: the page type and the overlay you opened, as you set them
+  // (`window.CL_JOINS_PAGE`, `window.CL_JOINS_OPEN`), and the panels this script itself sees open over the page —
+  // a fixed box at least 200 × 200px holding text, on the screen (the outermost of them).
+  const panels = qa('body *').filter((el) => {
+    if (getComputedStyle(el).position !== 'fixed' || hidden(el)) return false;
+    const r = box(el);
+    return r.width >= 200 && r.height >= 200 && r.left < W && r.right > 0 && r.top < window.innerHeight && r.bottom > 0 && /[\p{L}\p{N}]/u.test(text(el));
+  });
+  const said = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
   const result = {
     tool: 'joins.js',
     source: location.href,
+    measured_at: new Date().toISOString(),
+    page_type: said(window.CL_JOINS_PAGE),
+    opened: said(window.CL_JOINS_OPEN),
+    overlays_open: panels.filter((el) => !panels.some((o) => o !== el && o.contains(el))).map(describe),
     viewport: { width: window.innerWidth, height: window.innerHeight },
     collapsibles, open_collapsibles: openCollapsibles,
-    rhythm: rhythm ? { stack: Number(rhythm.stack), section: Number(rhythm.section) || null } : null,
+    rhythm: rhythm ? { stack: Number(rhythm.stack), section: Number(rhythm.section) || null, edge: edgeWant } : (edgeWant ? { edge: edgeWant } : null),
     unreadable_stylesheets: unreadable,
     scoped_rules: scopedRules,
     findings,

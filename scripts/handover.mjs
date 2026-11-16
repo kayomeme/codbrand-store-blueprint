@@ -6,6 +6,7 @@
  *                     [--block-kept <custom-block-id> "why this build did not write it"] …
  *                     [--floating-bar "why the merchant wants a header bar only as wide as its content"]
  *                     [--utc-intended "why the store's customers keep UTC"]
+ *                     --joins <folder holding the browser pass: one joins.js result per .json file>
  *
  * `preflight.mjs` asks whether a build can START. This asks whether it may END. It is the
  * UNCONDITIONAL gate: `match.mjs` only runs when the merchant named a reference site, which most of
@@ -51,7 +52,7 @@
  *      reads back exactly as written. Measured 21-09-2026: `height:221px` stored, a header about 103px
  *      tall on the page. A height that is not a real length (`auto`, `0`) is worse: the plugin still
  *      zeroes the bar's padding for it. Each side is judged by its own layout and height: phones can
- *      have their own (`main_header_mobile_layout`, a phone height), and the plugin compiles each side
+ *      have their own (`main_header_layout_mobile`, a phone height), and the plugin compiles each side
  *      apart. The bar's own padding counts before its card design's.
  *
  *   6. THE SEE-THROUGH STUCK HEADER. Once a sticky header sticks, whichever rule wins the cascade
@@ -149,6 +150,11 @@
  *  27. THE HOST'S BOT CHECK. Reads are paced; a challenge page the host answers instead of the store is
  *      waited out, then reported as the host's, never as a missing permission.
  *
+ *  28. NO BROWSER PASS. What a shopper sees is checked in the browser by joins.js, and the gate takes its
+ *      saved results (`--joins <folder>`), not a word that it ran: every page type at a phone, a tablet and
+ *      a desktop width, every overlay the store has open, every finding fixed or given a reason (see
+ *      checkJoins()). Text left at a text design of 0 on a dark page is warned about beside it.
+ *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
  *
@@ -168,7 +174,7 @@
  * preflight.mjs and match.mjs do not — killing the loop mid-write truncates the report.
  */
 
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -194,6 +200,10 @@ if (floatAt !== -1) flagValues.add(floatAt + 1);
 const utcAt = argv.findIndex((a) => a === '--utc-intended');
 const utcReason = utcAt === -1 ? null : (argv[utcAt + 1] ?? '');
 if (utcAt !== -1) flagValues.add(utcAt + 1);
+/* `--joins <folder>`: this build's browser pass — one joins.js result per .json file, as joins.js prints it. */
+const joinsAt = argv.findIndex((a) => a === '--joins');
+const joinsDir = joinsAt === -1 ? null : (argv[joinsAt + 1] ?? '');
+if (joinsAt !== -1) flagValues.add(joinsAt + 1);
 argv.forEach((a, i) => {
   if (a !== '--block-kept') return;
   flagValues.add(i + 1).add(i + 2);
@@ -1024,7 +1034,37 @@ async function readPageBackgrounds(call, R, resolve, designs) {
     : colourOf(res.body?.settings?.page_background_style ?? '',
       'the store sets no page background, so the theme\'s colour shows and the api cannot see it');
   const productCss = designs.find((d) => d.type === 'product')?.settings?.product_page_style;
-  return { store, product: productCss ? colourOf(productCss, null) : null };
+  return { store, product: productCss ? colourOf(productCss, null) : null, modes: widthModeInsets(res) };
+}
+
+/**
+ * The side padding each width mode gives what it holds, per breakpoint, from the store's own compiled
+ * rules (store_settings → global layout; plugin `comps/store/…/global_layout/v1/generated_css.php`):
+ * `cl-full-width` sets none, `cl-boxed-mode` sets 0, the two padded modes carry `full_width_padded_style`
+ * / `boxed_mode_padded_style`, and on phones their `*_mobile_style` overrides what it declares. `null`
+ * when store_settings could not be read.
+ */
+function widthModeInsets(res) {
+  if (res.status !== 200) return null;
+  const s = res.body?.settings ?? {};
+  const at = (css, mobile) => { const desktop = cascade(new Map(), css); return { desktop, phone: cascade(new Map(desktop), mobile) }; };
+  return {
+    'cl-full-width': at('', ''),
+    'cl-boxed-mode': at('padding-left:0;padding-right:0', ''),
+    'cl-full-width-padded': at(s.full_width_padded_style ?? '', s.full_width_padded_mobile_style ?? ''),
+    'cl-boxed-mode-padded': at(s.boxed_mode_padded_style ?? '', s.boxed_mode_padded_mobile_style ?? ''),
+  };
+}
+
+/* The bands a design can paint across the screen while its content stays in its width mode (plugin G142:
+ * the preset's paint on an outer full-screen box, `cl-card-paint-only`, its padding on the box inside the
+ * width mode, `cl-card-padding-only`): the block, and the main footer's key its bottom bar follows on `same`. */
+const SCREEN_BANDS = { main_header: null, main_footer: null, bottom_footer: 'main_footer' };
+function paintedAcrossScreen(s, block) {
+  if (!(block in SCREEN_BANDS)) return false;
+  let w = String(s[`${block}_background_width`] ?? '');
+  if (w === 'same' && SCREEN_BANDS[block]) w = String(s[`${SCREEN_BANDS[block]}_background_width`] ?? '');
+  return w === 'screen';
 }
 
 /**
@@ -1126,12 +1166,12 @@ function sidePadded(side, map, guarded, bar) {
 
 /**
  * Which layout each side of a header compiles with. Desktop — 768px and wider — is
- * `main_header_layout`. Phones — below 768px — are `main_header_mobile_layout`, unless it is `same`
+ * `main_header_layout`. Phones — below 768px — are `main_header_layout_mobile`, unless it is `same`
  * (the default) or absent (an install that predates the key), when phones follow desktop.
  */
 function headerLayouts(settings) {
   const desktop = String(settings.main_header_layout ?? '');
-  const mobile = String(settings.main_header_mobile_layout ?? 'same');
+  const mobile = String(settings.main_header_layout_mobile ?? 'same');
   const own = mobile !== '' && mobile !== 'same';
   return { desktop, phones: own ? mobile : desktop, own };
 }
@@ -1191,7 +1231,7 @@ function checkHeaderVerticalSpace(headers, presetsById) {
     // With a phone layout of its own, say which key gave each side its layout. With `same` the message
     // is the single-layout one, unchanged.
     const lead = (flat) => (layouts.own
-      ? `${d.label} (${flat.map((side) => `${side}: \`${side === 'phones' ? 'main_header_mobile_layout' : 'main_header_layout'}\` is \`${layouts[side]}\``).join(', ')})`
+      ? `${d.label} (${flat.map((side) => `${side}: \`${side === 'phones' ? 'main_header_layout_mobile' : 'main_header_layout'}\` is \`${layouts[side]}\``).join(', ')})`
       : d.label);
 
     if (flatIn.guard.length) {
@@ -1395,7 +1435,7 @@ function checkHeaderWidths(headers) {
         }
       }
     }
-    const rowUsed = ['end_menu_position', 'end_menu_mobile_position'].some((k) => String(s[k] ?? '') === 'bottom_row');
+    const rowUsed = ['end_menu_position', 'end_menu_position_mobile'].some((k) => String(s[k] ?? '') === 'bottom_row');
     if (rowUsed && !full && 'main_header_bottom_row_width' in s) {
       checked++;
       const row = String(s.main_header_bottom_row_width);
@@ -1418,6 +1458,13 @@ function checkHeaderWidths(headers) {
  * A container whose own `<block>_is_active` is "no" is not rendered and is skipped. The comparison
  * is with the page, which is the right answer for the header, footer and topbar and an approximation
  * for a container nested inside a drawer, whose own background it sits on.
+ *
+ * A header, footer or bottom-bar band painted ACROSS THE SCREEN (`*_background_width: screen`) is
+ * built differently: the preset's paint goes on an outer full-screen box and its padding on a box inside
+ * the width mode, so the text's distance from the band's edge is the width mode's padding plus the
+ * preset's. Measured on one store: presets with 0 side padding there, the width mode `cl-boxed-mode-padded`
+ * (48px, 16px on phones), logo and footer text 48 / 16px from the band's edge. Such a band passes at a
+ * breakpoint where its width mode pads both sides; in a mode that pads nothing it is still flush.
  */
 async function checkBands(designs, presetsById, resolve, pageBackgrounds) {
   const found = new Map();
@@ -1436,11 +1483,25 @@ async function checkBands(designs, presetsById, resolve, pageBackgrounds) {
       const at = presetAt(preset);
       if (!at) continue;
       checked++;
-      for (const [bp, map] of [['desktop', at.desktop], ['phones (under 767px)', at.phone]]) {
+      const screen = paintedAcrossScreen(d.settings, block);
+      for (const [bp, map, side] of [['desktop', at.desktop, 'desktop'], ['phones (under 767px)', at.phone, 'phone']]) {
         if (!(isZeroLength(map.get('padding-left')?.value) && isZeroLength(map.get('padding-right')?.value))) continue;
         const paint = paintOf(map, resolve);
         if (paint.none) continue;
         const use = `${d.label} ${key}`;
+        // Painted across the screen, the band's edge is the screen's, and the width mode pads the content
+        // inside it: no flush text when that mode gives both sides a padding at this breakpoint.
+        if (screen) {
+          if (!pages) pages = await pageBackgrounds();
+          const mode = String(d.settings[`${block}_width_mode`] ?? '');
+          const inset = pages.modes?.[mode]?.[side];
+          if (!pages.modes) {
+            undecided.push(`${use}: card design #${id} is painted across the screen with no side padding on ${bp}, and the ` +
+              'width modes could not be read (store_settings) to tell whether `' + mode + '` pads its content');
+            continue;
+          }
+          if (inset && !isZeroLength(inset.get('padding-left')?.value) && !isZeroLength(inset.get('padding-right')?.value)) continue;
+        }
         if (paint.unresolved) {
           undecided.push(`${use}: card design #${id} paints ${paint.text} with no side padding on ${bp}, and ${paint.unresolved}`);
           continue;
@@ -1468,9 +1529,10 @@ async function checkBands(designs, presetsById, resolve, pageBackgrounds) {
     return `card design #${f.preset.id} "${f.preset.title}" paints a background (${paints})${page}, but sets no horizontal\n` +
       `      padding on ${f.bp}: css_default \`${f.preset.css_default || '—'}\`, css_mobile \`${f.preset.css_mobile || '—'}\`.\n` +
       `      Used by: ${f.uses.join(', ')}\n` +
-      '      The text will sit exactly ON the band\'s visible edge, both sides. The page width mode does NOT\n' +
-      '      rescue this -- it insets the block INCLUDING its background, so the gap between the edge and\n' +
-      '      the text stays 0 at every width mode. Pad the card design at that breakpoint: css_default for\n' +
+      '      The text will sit exactly ON the band\'s visible edge, both sides. A width mode does NOT rescue\n' +
+      '      this -- it insets the block INCLUDING its background -- except for a header or footer band painted\n' +
+      '      across the screen (`*_background_width: screen`) in a width mode that pads both sides, which none\n' +
+      '      of the uses above is. Pad the card design at that breakpoint: css_default for\n' +
       '      desktop, css_mobile for phones, which wins there for every property it declares. Check its\n' +
       '      used_count first, and if the band should blend into the page, make it transparent instead.\n' +
       '      See api-recipes.md → "A coloured band needs its own side padding, on phones too".';
@@ -1483,6 +1545,45 @@ async function checkBands(designs, presetsById, resolve, pageBackgrounds) {
     );
   }
   return { checked, problems };
+}
+
+/**
+ * A TEXT WITH NO TEXT DESIGN ON A DARK PAGE (a warning). A `*_text_preset` at 0 gives its text no style of its own:
+ * it takes its colour from what is around it (the plugin's own "inherit" for most such keys) and, where nothing
+ * around it sets one, from the theme's page text — which no door sets (store_settings → `page_background_style`
+ * takes a background colour only) and the api cannot see. Measured on one dark store: a stock-waitlist title at 0
+ * drew #000 on #151517 (1.15 : 1). "Dark" = black text would miss WCAG 1.4.3's 4.5 : 1 on the page there. Only
+ * active blocks; the browser decides what really shows (joins.js `low-contrast`), so this is never a failure.
+ */
+async function checkTextAtZero(designs, pageBackgrounds) {
+  const lum = (c) => 0.2126 * ch(c.rgb[0]) + 0.7152 * ch(c.rgb[1]) + 0.0722 * ch(c.rgb[2]);
+  const ch = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  const blackFails = (c) => c && !c.unresolved && (lum(c) + 0.05) / 0.05 < 4.5;
+  const zero = [];
+  for (const d of designs) {
+    for (const [key, raw] of Object.entries(d.settings)) {
+      if (!/_text_preset$/.test(key) || String(raw ?? '').trim() !== '0') continue;
+      // The block a key belongs to: the longest prefix with its own `_is_active`.
+      const parts = key.split('_');
+      let active = true;
+      for (let i = parts.length - 1; i > 0; i--) {
+        const sw = `${parts.slice(0, i).join('_')}_is_active`;
+        if (sw in d.settings) { active = String(d.settings[sw]) !== 'no'; break; }
+      }
+      if (active) zero.push({ d, key });
+    }
+  }
+  if (!zero.length) return [];
+  const pages = await pageBackgrounds();
+  const pageOf = (d) => (d.type === 'product' && pages.product ? pages.product : pages.store);
+  const dark = zero.filter(({ d }) => blackFails(pageOf(d)));
+  if (!dark.length) return [];
+  const page = [...new Set(dark.map(({ d }) => describe(pageOf(d))))].join(', ');
+  return [`${dark.length} text(s) on a dark page (${page}) have no text design of their own (preset 0):\n` +
+    dark.slice(0, 8).map(({ d, key }) => `        ${d.label}.${key}`).join('\n') + (dark.length > 8 ? `\n        … and ${dark.length - 8} more` : '') + '\n' +
+    '    At 0 a text takes its colour from what is around it, and where nothing around it sets one, from the theme\'s\n' +
+    '    page text, which no door sets — measured on one dark store: #000 on #151517. Pick a text design for each one\n' +
+    '    a shopper sees, or check it shown in the browser (joins.js reports `low-contrast`).'];
 }
 
 /* The lists whose cards stand side by side or one under another: the key holding the space between the
@@ -1574,7 +1675,7 @@ async function checkListGaps(call, R, designs, presetsById, resolve) {
     const col = css.get('column-gap')?.value ?? c;
     const zero = (v) => v !== undefined && (isZeroLength(v) || /^normal$/i.test(v));
     const slider = String(get('pagination_type')) === 'slider';
-    const oneColumn = ['desktop_columns', 'mobile_columns'].every((k) => String(get(k)) === '1');
+    const oneColumn = ['columns_desktop', 'columns_mobile'].every((k) => String(get(k)) === '1');
     const touch = [];
     if (zero(col) && (slider || !oneColumn)) touch.push('side by side');
     if (zero(row) && !slider) touch.push('one under the next');
@@ -2184,10 +2285,13 @@ function partialReach(feature, reached, total, reason) {
  * `always_visible` hides unless `look_always_visible_header_is_active`; the tick boxes show `look_heading_text`; a
  * Bought together box `look_bought_together_heading_text`. The saving is `products_discount_value`, or an offered
  * product on sale (never in a Bought together box, which saves nothing at 0). Until the upsells design (04-11-2026)
- * all of this sat on the product design as `p_upsell_*`.
+ * all of this sat on the product design as `p_upsell_*`. A product sold through partners' links is shown with the
+ * partner's button, not "add" (comps/upsells/frontend/views/look/cards/buttons.php): an upsell offering only those
+ * is a recommendation and needs no saving. Measured on one store selling 14 of 20 products that way.
  */
-async function goalUpsells(ctx, productsRead, rows, reason) {
+async function goalUpsells(ctx, productsRead, rows, reason, call, R) {
   const problems = [];
+  const notes = [];
   const byId = new Map(productsRead.rows.map((p) => [String(p.id), p]));
   const paired = [...new Set([...rows.upsold.values()].flat().map((u) => String(u.id)))].map((id) => byId.get(id)).filter(Boolean);
   const onSale = (p) => String(p.on_sale ?? '') === 'yes' || yes(p.on_sale) ||
@@ -2213,9 +2317,24 @@ async function goalUpsells(ctx, productsRead, rows, reason) {
     }
     const discount = Number(s.products_discount_value ?? 0);
     if (!(discount > 0) && !(u.look !== 'bought_together' && offered.some(onSale))) {
-      problems.push(`${who}: the upsell offers NO saving — \`products_discount_value\` is 0 and no product it offers\n` +
-        '      is on sale — so it shows products at full price with no reason to add them. An offer is a promise: set the\n' +
-        '      saving the merchant agreed to, and ask them when they have not said. Never invent one.');
+      // A product sold through partners' links shows the partner's button on an upsell card, not "add": nothing to
+      // add here, so nothing to discount. Only the products a shopper can buy here need the saving.
+      const away = offered.length ? await soldElsewhere(offered, call, R, ctx) : new Set();
+      const here = offered.filter((p) => !away.has(String(p.id)));
+      if (away.size && !here.length) {
+        notes.push(`${who}: no saving, and every product it offers (${offered.length}) is sold through partners' links, so it\n` +
+          '    is a recommendation: its cards show the partner\'s button, with nothing to add here or to discount.');
+      } else {
+        const hereIds = new Set(here.map((p) => String(p.id)));
+        const pages = away.size ? [...rows.upsold].filter(([, list]) => list.some((x) => hereIds.has(String(x.id))))
+          .map(([id]) => `${clip(byId.get(String(id))?.title ?? 'product', 30)} (#${id})`) : [];
+        problems.push(`${who}: the upsell offers NO saving — \`products_discount_value\` is 0 and no product it offers\n` +
+          '      is on sale — so it shows products at full price with no reason to add them. An offer is a promise: set the\n' +
+          '      saving the merchant agreed to, and ask them when they have not said. Never invent one.' +
+          (away.size ? `\n      ${away.size} of the ${offered.length} products it offers ${away.size === 1 ? 'is' : 'are'} sold through partners' links and need none. Sold\n` +
+            `      here: ${here.slice(0, 5).map((p) => `${clip(p.title, 30)} (#${p.id})`).join(', ')}${here.length > 5 ? ' …' : ''}` +
+            (pages.length ? `; offered on ${pages.slice(0, 3).join(', ')}${pages.length > 3 ? ` and ${pages.length - 3} more page(s)` : ''}` : '') + '.' : ''));
+      }
     } else if (u.look === 'cards' && !yes(s.look_regular_price_is_active) && !yes(s.look_sale_price_is_active)) {
       problems.push(`${who}: the upsell has a saving, but both of its price displays are off, so nobody sees it.`);
     }
@@ -2228,7 +2347,126 @@ async function goalUpsells(ctx, productsRead, rows, reason) {
   }
   const reach = rows.everywhere ? null : partialReach('the upsell', rows.count, rows.total, reason);
   if (reach) problems.push(reach);
-  return { problems, notes: [] };
+  return { problems, notes };
+}
+
+/**
+ * The products of a list a shopper cannot buy here: sold through partners' links. The plugin's own test
+ * (AffiliateModelFR_cl::isBoxActive, comps/affiliate): the store's affiliate switch on (`affiliate/settings`
+ * is_active, without it nothing affiliate registers), the product's own switch on and one usable link
+ * (`product/affiliate`). Read once per product and kept on `ctx`; a store with no affiliate door sells all.
+ */
+async function soldElsewhere(products, call, R, ctx) {
+  if (ctx.affiliateOn === undefined) {
+    const res = await call(pathFor('affiliate_settings', 'affiliate/settings', R));
+    ctx.affiliateOn = res.status === 200 && String(firstRow(res.body)?.is_active ?? '') === 'yes';
+    ctx.linkOut = new Map();
+  }
+  const away = new Set();
+  if (!ctx.affiliateOn) return away;
+  for (const p of products) {
+    const id = String(p.id);
+    if (!ctx.linkOut.has(id)) {
+      const res = await call(`${pathFor('product_affiliate', 'product/affiliate', R)}?product_id=${encodeURIComponent(id)}`);
+      const row = res.status === 200 ? firstRow(res.body) : null;
+      ctx.linkOut.set(id, String(row?.is_active ?? '') === 'yes' && (asArray(row?.links) ?? []).some((l) => l?.usable === true));
+    }
+    if (ctx.linkOut.get(id)) away.add(id);
+  }
+  return away;
+}
+
+/**
+ * 28 — THE BROWSER PASS. Every check above reads the api; what a shopper sees is checked in the browser by joins.js
+ * (order-of-work.md → phase 10), and this gate takes its saved results, never a word that it ran (`--joins
+ * <folder>`, one result per .json file, as joins.js prints it). It fails unless they cover home, a category and a
+ * product page — and the cart and the checkout where the store shows them as pages (`stores` → `cart_mode`,
+ * `checkout_mode` `in_page`) — each at a phone (under 768px), a tablet (768–1199px) and a desktop width (1200px or
+ * more), with no overlay open; the quick view, the cart drawer (`cart_mode` `modal_left` / `modal_right`) and the
+ * checkout pop-up (`checkout_mode` `modal`) the store has, each open, at a phone and a desktop width — joins.js
+ * records the label it was given (CL_JOINS_PAGE, CL_JOINS_OPEN) and sees for itself whether a panel is open. Each
+ * result: of this site, with the store's spacing set, under a day old (the api says nothing of when a design last
+ * changed, so an older pass is not a current fact). Each finding: fixed, or listed in that result's `accepted`
+ * ({ check, where, why }) with a reason. Measured on one build: the gate passed (12 ✓) while joins.js, run with the
+ * rhythm, found 7 of 29 joins off it on the home page and 12–19 small targets on every page, and 768 never ran.
+ */
+function checkJoins(dir, site, store, quickview) {
+  const how = '      Run scripts/joins.js as order-of-work.md → phase 10 says, save each result it prints as a .json file in one\n' +
+    '      folder, and pass the folder: --joins <folder>.';
+  if (!dir) {
+    return { problems: ['NO BROWSER PASS: no joins.js result was given (--joins <folder>), so nothing a shopper sees on a page\n' +
+      `      was checked — only what the api says.\n${how}`] };
+  }
+  let files;
+  try { files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.json')); } catch (e) {
+    return { problems: [`NO BROWSER PASS: the folder ${dir} could not be read (${e.code || e.message}).\n${how}`] };
+  }
+  const hostOf = (u) => new URL(u).host.replace(/^www\./i, '');
+  const host = hostOf(site);
+  const results = [];
+  const refused = [];
+  for (const f of files) {
+    let j;
+    try { j = JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch { refused.push(`${f}: not JSON`); continue; }
+    if (j?.tool !== 'joins.js' || !Array.isArray(j.findings)) { refused.push(`${f}: not a joins.js result`); continue; }
+    let h = '';
+    try { h = hostOf(j.source); } catch { /* reported below */ }
+    const at = Date.parse(j.measured_at ?? '');
+    if (h !== host) refused.push(`${f}: measured ${j.source || 'no page'}, not this site`);
+    else if (!(at > 0)) refused.push(`${f}: no measured_at — a joins.js older than this gate: run the one beside it`);
+    else if (Date.now() - at > 24 * 3600e3) refused.push(`${f}: measured ${j.measured_at}, over a day ago — measure again`);
+    else if (!(Number(j.rhythm?.stack) > 0)) refused.push(`${f}: measured without the store's spacing (CL_JOINS_RHYTHM)`);
+    else if (j.opened && !(asArray(j.overlays_open) ?? []).length) refused.push(`${f}: labelled "${j.opened}" open, but joins.js saw no panel open`);
+    else results.push({ f, j, w: Number(j.viewport?.width) || 0 });
+  }
+  const band = (w) => (w < 768 ? 'phone' : w < 1200 ? 'tablet' : 'desktop');
+  const label = (v) => String(v ?? '').trim().toLowerCase();
+  const pages = ['home', 'category', 'product'];
+  if (String(store?.cart_mode ?? '') === 'in_page') pages.push('cart');
+  if (String(store?.checkout_mode ?? '') === 'in_page') pages.push('checkout');
+  const overlays = [];
+  if (quickview) overlays.push('quick view');
+  if (/^modal_(left|right)$/.test(String(store?.cart_mode ?? ''))) overlays.push('cart drawer');
+  if (String(store?.checkout_mode ?? '') === 'modal') overlays.push('checkout popup');
+  const missing = [];
+  for (const p of pages) {
+    for (const b of ['phone', 'tablet', 'desktop']) {
+      if (!results.some((r) => label(r.j.page_type) === p && !r.j.opened && band(r.w) === b)) missing.push(`${p} at a ${b} width`);
+    }
+  }
+  for (const o of overlays) {
+    for (const b of ['phone', 'desktop']) {
+      if (!results.some((r) => label(r.j.opened) === o && band(r.w) === b)) missing.push(`the ${o} open at a ${b} width`);
+    }
+  }
+  const open = [];
+  for (const r of results) {
+    const accepted = asArray(r.j.accepted) ?? [];
+    for (const fd of r.j.findings) {
+      const a = accepted.find((x) => x?.check === fd.check && x?.where === fd.where);
+      if (!(a && String(a.why ?? '').trim().length >= MIN_REASON)) open.push({ r, fd, short: !!a });
+    }
+  }
+  const problems = [];
+  if (refused.length) {
+    problems.push(`${refused.length} joins.js result(s) do not count:\n` + refused.slice(0, 8).map((x) => `        ${x}`).join('\n') +
+      (refused.length > 8 ? `\n        … and ${refused.length - 8} more` : ''));
+  }
+  if (missing.length) {
+    problems.push(`THE BROWSER PASS IS NOT COMPLETE — no joins.js result (with CL_JOINS_PAGE / CL_JOINS_OPEN set) for:\n` +
+      missing.map((m) => `        ${m}`).join('\n') + '\n' +
+      '      Each page type looks different at each width, and what an overlay holds is checked only while it is open.\n' + how);
+  }
+  if (open.length) {
+    const byCheck = new Map();
+    for (const o of open) byCheck.set(o.fd.check, (byCheck.get(o.fd.check) ?? 0) + 1);
+    problems.push(`${open.length} joins.js finding(s) neither fixed nor given a reason (${[...byCheck].map(([c, n]) => `${n} ${c}`).join(', ')}):\n` +
+      open.slice(0, 8).map((o) => `        ${o.r.f} @${o.r.w}: ${o.fd.check} ${clip(String(o.fd.where), 50)} — ${clip(String(o.fd.detail), 90)}` +
+        (o.short ? ` (its reason is under ${MIN_REASON} characters)` : '')).join('\n') + (open.length > 8 ? `\n        … and ${open.length - 8} more` : '') + '\n' +
+      '      Fix each one and measure again, or add it to that result\'s "accepted": [{ "check", "where", "why" }] with why\n' +
+      '      this design keeps it.');
+  }
+  return { problems, pass: `the browser pass covers ${pages.length} page type(s) at three widths${overlays.length ? ` and ${overlays.join(', ')} open` : ''}, every finding fixed or given a reason (${results.length} joins.js result(s))` };
 }
 
 /**
@@ -2577,7 +2815,7 @@ function listCustomCode(store, designs, pagesRead, productsRead) {
 }
 
 /* ── 25 · the cramped filter drawer ────────────────────────────────────────────────────────────────────
- * On a phone the filter opens as a drawer (`filter_layout` / `filter_mobile_layout` `modal_left` or
+ * On a phone the filter opens as a drawer (`filter_layout` / `filter_layout_mobile` `modal_left` or
  * `modal_right`). Its padding is its own `filter_drawer_style` side by side, else its card design's and
  * `filter_container_style`'s; its close button is an icon design. Measured on one store: a card made for page
  * gutters on the drawer (no room above, 48px each side) and a close × of 16 × 22. Above 24px of padding the
@@ -2591,9 +2829,9 @@ function checkFilterDrawers(designs, presetsById) {
   for (const d of designs) {
     const s = d.settings;
     if (!('filter_drawer_style' in s) || ('filter_is_active' in s && !yes(s.filter_is_active))) continue;
-    /* A drawer on computers (`filter_layout`), on phones (`filter_mobile_layout`), or both: each is judged with
+    /* A drawer on computers (`filter_layout`), on phones (`filter_layout_mobile`), or both: each is judged with
      * its own breakpoint's values — a card can pad 48px on desktop and 20px on phones. */
-    const where = [['computers', 'desktop', 'filter_layout'], ['phones', 'phone', 'filter_mobile_layout']]
+    const where = [['computers', 'desktop', 'filter_layout'], ['phones', 'phone', 'filter_layout_mobile']]
       .filter(([, , k]) => /^modal_/.test(String(s[k] ?? '')));
     if (!where.length) continue;
     const own = cascade(new Map(), s.filter_drawer_style);
@@ -3113,6 +3351,9 @@ async function main(base) {
    * design — and the upsells the pages' blocks pick: read once, for the checks below. */
   const shown = await shownDesigns(call, R, designs, pagesRead, cb.rows ?? [], productsRead);
   const upsells = await readPickedUpsells(call, R, designs);
+  /* Whether a shopper can open a quick view: a listing's button, or an upsell card's (the browser pass needs it open). */
+  let quickviewShown = upsells.picked.some((u) => yes(u.settings.look_quickview_bt_is_active))
+    || designs.some((d) => d.type === 'plist1' && yes(d.settings.quickview_bt_is_active));
 
   /* ── the card designs: the header's height and stuck state, and every coloured band ─────────── */
   const presetsRead = await walk(call, pathFor('design_controls_presets', 'design_controls/presets', R));
@@ -3152,9 +3393,11 @@ async function main(base) {
 
     /* Read only when an unpadded band needs a page to compare with — so a store with none never
      * depends on store_settings being readable. */
-    const pageBackgrounds = () => readPageBackgrounds(call, R, resolve, designs);
+    let pagesRead = null;
+    const pageBackgrounds = () => (pagesRead ??= readPageBackgrounds(call, R, resolve, designs));
     const bands = await checkBands(designs, presetsById, resolve, pageBackgrounds);
     problems.push(...bands.problems);
+    notes.push(...await checkTextAtZero(designs, pageBackgrounds));
     if (!bands.problems.length) {
       line(true, `every coloured band has side padding on desktop and on phones (${bands.checked} card design use(s) checked)`);
       passed.push('every coloured band has side padding');
@@ -3174,6 +3417,7 @@ async function main(base) {
     /* Every list design a shopper meets — the store's own and those a page or a template names — for the drawer
      * and card-look checks. Measured: the cramped drawer was on a listing reached only through the category page. */
     const listDesigns = [...designs, ...shown];
+    quickviewShown ||= listDesigns.some((d) => d.type === 'plist1' && yes(d.settings.quickview_bt_is_active));
     notes.push(...checkFilterDrawers(listDesigns, presetsById));
     notes.push(...checkSameKindLooks(listDesigns));
   }
@@ -3362,6 +3606,14 @@ async function main(base) {
       '    merchant the site is visible to search engines.');
   }
 
+  /* ── the browser pass: joins.js's saved results ──────────────────────────────────────────────── */
+  const browserPass = checkJoins(joinsDir, base, store, quickviewShown);
+  problems.push(...browserPass.problems);
+  if (!browserPass.problems.length) {
+    line(true, browserPass.pass);
+    passed.push('the browser pass is complete');
+  }
+
   if (hostChallenge.count) {
     problems.push(`the HOST's bot check answered ${hostChallenge.count} read(s) instead of the store (${hostChallenge.paths.join(', ')}), so what\n` +
       '      they feed was NOT checked. That is the hosting\'s protection ("Checking your browser"), not the store and not a\n' +
@@ -3418,7 +3670,7 @@ async function main(base) {
 }
 
 if (!rawUrl || !apiKey) {
-  console.error('usage: node handover.mjs <site-url> <api-key> [--wordmark-intended "reason"] [--block-kept <id> "reason"] …');
+  console.error('usage: node handover.mjs <site-url> <api-key> --joins <folder> [--wordmark-intended "reason"] [--block-kept <id> "reason"] …');
   process.exitCode = 1;
 } else {
   const base = rawUrl.replace(/\/+$/, '').replace(/\/wp-json.*$/, '') + '/wp-json/cl-api/v1';

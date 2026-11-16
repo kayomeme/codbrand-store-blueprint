@@ -419,7 +419,7 @@ a 78px button still crushes its label.*
 2. **The longest button label fits on one line inside the card**, in the store's language, after you
    have written the copy. Translation changes a label's length, so check it after the copy is written.
 
-Otherwise use one column. The listing design's `mobile_columns` setting holds it (1 or 2). A
+Otherwise use one column. The listing design's `columns_mobile` setting holds it (1 or 2). A
 `cl/products-listing` block on a page overrides it with its own `mobileColumns`, and `inherit` follows
 the design, so set the page's blocks as well, or leave them on `inherit`. Read the design's
 `settings_schema` for the current buttons-layout values rather than trusting this paragraph. Then look
@@ -677,11 +677,11 @@ What the source actually does:
 Pick a layout because you want that arrangement. Read the live list from
 `GET section_manager/global_settings/header/{id}` → `settings_schema.main_header_layout.options`
 rather than assuming any particular value is still the shipped default. On phones the same choice is
-`main_header_mobile_layout` (below).
+`main_header_layout_mobile` (below).
 
 ### Phones can have their own layout
 
-`main_header_layout` is the layout on tablets and larger (768px and wider). `main_header_mobile_layout`
+`main_header_layout` is the layout on tablets and larger (768px and wider). `main_header_layout_mobile`
 is the layout on phones only (below 768px): the same layouts, plus `same`, the default, which keeps one
 layout at every width. The plugin compiles each side in its own media query, so the rules on this page
 (where the logo sits, the height below) apply to each side with its own layout. Read
@@ -728,7 +728,7 @@ there changes with `main_header_layout`:
   or no height.
 
 **These rules apply to each side with its own layout.** When phones have a layout of their own
-(`main_header_mobile_layout`, above), the plugin compiles desktop and phones apart: a `stacked` phone
+(`main_header_layout_mobile`, above), the plugin compiles desktop and phones apart: a `stacked` phone
 layout ignores `height` on phones while a one-row desktop keeps it, and the padding is zeroed only on a
 side whose layout is not `stacked`. So a desktop that looks right says nothing about the phone bar.
 
@@ -774,10 +774,11 @@ where their customers are.
 Check the things a status code cannot: does the palette read; is the price legible; does the buy
 button look like a buy button; does the page hold together on a phone.
 
-**Run the gate before you look**, on every build — reference site or not:
+**Run the browser pass, then the gate**, on every build — reference site or not: `scripts/joins.js` on each
+page type, width and overlay, each result saved in one folder (`order-of-work.md` → phase 10), then:
 
 ```
-node scripts/handover.mjs <site-url> <api-key>
+node scripts/handover.mjs <site-url> <api-key> --joins <folder>
 ```
 
 It reads the store back and exits 1 on the failures that leave no visible trace: the logo half-state,
@@ -885,7 +886,10 @@ This applies to every design, not only the footer. If a design's card design pai
 differs from the page, the text inside it needs that card design's own side padding. The page gutter
 will not provide it: the width class pads an outer wrapper, so it moves the whole band away from the
 screen edge, not the text away from the band's edge. `codbrand-content-builder` enforces the same rule
-for page blocks.
+for page blocks. One exception: a header, footer or bottom-bar band painted across the screen
+(`*_background_width: screen`) paints on a box around the width mode, so a padded width mode does inset its
+text there — *measured on one store: header and footer presets with 0 side padding, text 48 / 16px from the band's
+edge in `cl-boxed-mode-padded`*. In a width mode with no padding it is flush again.
 
 Set the padding for **both** breakpoints: `css_default` for desktop and `css_mobile` for phones.
 `css_mobile` wins on phones for every property it declares, so after you change padding in one, read
