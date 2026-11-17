@@ -42,8 +42,9 @@
  *                       titles taking 1em margins from the browser, and a link in browser blue.
  *                       Where a stylesheet cannot be read (another origin), a finding is marked
  *                       `certain: false` — "could not tell", never "clean".
- *   dead-anchor         an in-page link `href="#id"` whose target is not on the page, or is hidden.
- *                       Measured: a summary linking to a shipping block that was switched off.
+ *   dead-anchor         an in-page link `href="#id"` whose target is not on the page, or is not rendered
+ *                       (switched off, hidden). An empty or 0-height target is one (a skip link's focus
+ *                       target). Measured: a summary linking to a shipping block that was switched off.
  *   soft-image          a photo whose file has too few pixels for the box it is drawn in, on this screen
  *                       or on a 2× phone (Lighthouse's rule). Measured: a product gallery drawing 800px
  *                       photos 710px wide, soft on every phone. Scroll the page through first, so lazy
@@ -76,7 +77,9 @@
  *                       content at one distance from the window's edge (±2px) — the header's; with
  *                       CL_JOINS_RHYTHM.edge, the header at that inset on a phone and never nearer the window
  *                       on a wider screen. Content inside a painted box narrower than the window starts where
- *                       the box does. Measured on one store at 1440: header 72px, trail 48px, title 64px.
+ *                       the box does; a part aligned to the end (by its CSS, or starting past the window's
+ *                       middle) is compared by its end with the header's end. Measured on one store at 1440: header
+ *                       72px, trail 48px, title 64px.
  *   glued-to-line       text whose line sits under 8px from a line another block draws. Measured: a trail
  *                       2px under the header's bottom line.
  *   side-gap            inside the cards of a list, under 8px between a card's photo and its text (Material's
@@ -435,6 +438,16 @@
   }
 
   // ── dead-anchor ───────────────────────────────────────────────────────────────────────────────
+  // A target is there when the page renders it — not switched off (display none), not hidden (visibility), not in a
+  // closed <details> — whatever its size: an empty focus target (`tabindex="-1"`, where a skip link sends focus past
+  // the header) and a 0-height anchor are targets. Measured on one store: its skip link's 1440 × 0 target was
+  // reported hidden on every page.
+  const rendered = (el) => {
+    if (!el.isConnected) return false;
+    if (el.checkVisibility) return el.checkVisibility({ visibilityProperty: true });
+    for (let p = el; p && p !== document.documentElement; p = p.parentElement) if (getComputedStyle(p).display === 'none') return false;
+    return getComputedStyle(el).visibility !== 'hidden';
+  };
   for (const a of qa('a[href^="#"]')) {
     const raw = a.getAttribute('href').slice(1);
     if (!raw || raw.startsWith('!') || raw === 'top') continue;
@@ -443,7 +456,7 @@
     const target = document.getElementById(id) || document.getElementsByName(id)[0];
     if (!isShown(a)) continue;
     if (!target) flag('dead-anchor', describe(a), `links to #${id}, which is not on this page — a link to a block that is switched off goes nowhere`);
-    else if (!isShown(target)) flag('dead-anchor', describe(a), `links to #${id}, which is on the page but hidden`);
+    else if (!rendered(target)) flag('dead-anchor', describe(a), `links to #${id}, which is on the page but hidden`);
   }
 
   // ── soft-image ────────────────────────────────────────────────────────────────────────────────
@@ -780,15 +793,35 @@
     }
     return panelMemo.get(el);
   };
-  const startIn = (root) => {
-    let best = null;
-    const take = (el, r) => { const at = panelOf(el) || r; if (!centred(el) && (!best || startOf(at) < startOf(best.r))) best = { el, r: at }; };
+  // A part's content nearest the start edge, and nearest the end edge (the end: right, or left in RTL).
+  const endOf = (r) => (rtl ? r.left : W - r.right);
+  const edgesIn = (root) => {
+    let start = null;
+    let end = null;
+    const take = (el, r) => {
+      // Content inside a control counts at the control's box: an icon keeps its size and its box reaches the edge
+      // (measured on one store: a header's cart button ending 48px from the right, its 22px glyph at 70).
+      const control = el.closest(TAPPABLE);
+      let at = panelOf(el) || (control && root.contains(control) ? box(control) : r);
+      // Only what shows: a row that clips its overflow (a menu swiped sideways) hides the rest. Measured on one store
+      // at 768: a header menu's last link cut behind the cart, its box 18px past the edge.
+      let [left, right] = [at.left, at.right];
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        if (getComputedStyle(a).overflowX !== 'visible') { const c = box(a); left = Math.max(left, c.left); right = Math.min(right, c.right); }
+        if (a === root) break;
+      }
+      if (right - left < 1) return;
+      if (left !== at.left || right !== at.right) at = { left, right, top: at.top, bottom: at.bottom, width: right - left, height: at.height };
+      if (centred(el)) return;
+      if (!start || startOf(at) < startOf(start.r)) start = { el, r: at };
+      if (!end || endOf(at) < endOf(end.r)) end = { el, r: at };
+    };
     for (const t of texts) if (root.contains(t.el)) for (const r of t.rects) take(t.el, r);
     for (const m of media) {
       const r = box(m);
       if (root.contains(m) && r.width < W * 0.9 && r.width > 0) take(m, r);
     }
-    return best;
+    return start ? { start, end } : null;
   };
   const parts = [
     ['the header', header],
@@ -796,16 +829,43 @@
     ['the page title', firstOf(['h1'], header)],
     ['the footer', firstOf(['[cl-compo="footer"]', 'footer', '[role="contentinfo"]'], header)],
   ].filter(([, el], i, all) => el && !all.slice(0, i).some(([, o]) => o && (o === el || o.contains(el))))
-    .map(([name, el]) => ({ name, el, start: startIn(el) })).filter((p) => p.start);
+    .map(([name, el]) => ({ name, el, ...(edgesIn(el) || {}) })).filter((p) => p.start);
   // Something outside the part, level with its first content and nearer the start edge: the part is not a row's start.
   const besideStart = (p) => texts.some((t) => !p.el.contains(t.el) && t.rects.some((r) => overlapY(r, p.start.r) > 0 && startOf(r) < startOf(p.start.r) - 2))
     || media.some((m) => { const r = box(m); return !p.el.contains(m) && r.width < W * 0.9 && overlapY(r, p.start.r) > 0 && startOf(r) < startOf(p.start.r) - 2; });
   const rows = parts.filter((p) => !besideStart(p));
   const side = rtl ? 'right' : 'left';
+  const otherSide = rtl ? 'left' : 'right';
+  // Aligned to the end edge, as its CSS says: text aligned to the end, or a flex row packing its items at the end,
+  // from the content up to the part. Measured on one store: its trail's list a flex row with `justify-content:
+  // flex-end` on computers and `flex-start` on phones.
+  const END_TEXT = rtl ? ['left', 'end', '-webkit-left'] : ['right', 'end', '-webkit-right'];
+  const endAligned = (el, root) => {
+    for (let a = el; a; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (END_TEXT.includes(cs.textAlign)) return true;
+      if (/flex/.test(cs.display) && !/column/.test(cs.flexDirection)) {
+        const packs = /reverse/.test(cs.flexDirection) ? ['flex-start', 'start'] : ['flex-end', 'end', rtl ? 'left' : 'right'];
+        if (packs.includes(cs.justifyContent)) return true;
+      }
+      if (a === root) break;
+    }
+    return false;
+  };
   if (rows.length) {
     const ref = rows[0];
     const x0 = round(startOf(ref.start.r));
+    const e0 = round(endOf(ref.end.r));
     for (const p of rows.slice(1)) {
+      // A part aligned to the end edge (by its CSS, or starting past the window's middle) is compared by its END with
+      // the header's end. Measured on one store: a trail ending on the header's end, reported as starting 1234px from
+      // the left.
+      if (endAligned(p.end.el, p.el) || startOf(p.start.r) > W / 2) {
+        const e = round(endOf(p.end.r));
+        if (Math.abs(e - e0) <= 2) continue;
+        flag('edge-mismatch', describe(p.el), `${p.name} is aligned to the ${otherSide} and ends ${e}px from that edge, ${ref.name} ${e0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content ends where ${ref.name}'s does`);
+        continue;
+      }
       const x = round(startOf(p.start.r));
       if (Math.abs(x - x0) <= 2) continue;
       flag('edge-mismatch', describe(p.el), `${p.name} starts ${x}px from the ${side} edge, ${ref.name} ${x0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content starts where ${ref.name}'s does`);

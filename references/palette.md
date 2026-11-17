@@ -5,7 +5,8 @@
 Each slot has a job. Fill roles, not swatches — that is what stops a pretty palette producing an
 unreadable price or an invisible border.
 
-Read the live palette before deciding anything: `GET /design_controls/color_palette`. These are the
+Read the live palette before deciding anything — `GET /design_controls/color_palette?per_page=100`, every page
+(`api-recipes.md` → "A list answers 20 rows"). These are the
 ids a stock install ships with, and their meanings:
 
 | id | name | role |
@@ -115,7 +116,7 @@ the merchant ticks exactly that and saves; the key does not need reissuing.
 **A fresh install ships two font rows**: `font1`, Inter, which is active and the default; and `font2`,
 a system serif (Georgia), which is switched off. An install seeded by an older version may carry
 different families in those two rows. Read what is actually there with
-`GET /design_controls/font_manager`, and never assume a family is present.
+`GET /design_controls/font_manager?per_page=100` (every page), and never assume a family is present.
 
 ⚠️ An earlier version of this page said "46 families ship — 17 Arabic, 29 Latin", which sent readers
 hunting for an Arabic list that is not installed. The 46 are real but they are a **picker list in the
@@ -200,4 +201,4 @@ nothing: header 72px from the edge, trail 48, title 64.*
 
 Also archetype-driven, also one decision: **line** icons for Caregiver / Sage / Ruler, **solid** for
 Magician / Everyman, **fine line** for Lover. Read what is available at
-`GET /design_controls/icons_manager` before assuming a set exists.
+`GET /design_controls/icons_manager?per_page=100` (every page) before assuming a set exists.

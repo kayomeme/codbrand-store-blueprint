@@ -17,6 +17,12 @@ GET /docs/{slug}           the human page for one resource
 Every write door also publishes its own field list with types and descriptions, and **a 400 names the
 field it refused and why**. Read the refusal; do not guess around it.
 
+**A list answers 20 rows unless you ask for more — and says so only in its headers.** Read every list with
+`?per_page=100&order=ASC` and follow `Link: <…>; rel="next"` until there is none (`X-WP-Total` is the count;
+`/docs/pagination`).
+A read of one item (`…/{id}`) is whole. *Measured on one store: the palette read without it returned 20 of its 26
+colours, the icons 20 of 46, the designs list 20 of 34.*
+
 What *this* file holds is the part the API cannot tell you: **the order, the preconditions, and the
 things that fail quietly.**
 
@@ -486,7 +492,7 @@ The docs cannot tell you the following:
 - **A shared link to a page with no featured image of its own previews with the store's logo**, and
   with no picture at all when the store has no logo. Check the `pages` door's own field list: if it
   takes no featured image, that fallback applies to every page you build.
-- **The seo design is listed by `GET section_manager/global_settings`** (type `seo`). Read it before
+- **The seo design is listed by `GET section_manager/global_settings?per_page=100`** (every page; type `seo`). Read it before
   you assume any of its switches. Which one a store uses is `seo_sm_id` on the `stores` door; at 0 the
   store uses the first active one, and `GET stores/{id}` names it under `renders.seo_sm_id`.
 - **Verify by reading the page's HTML**: the `<title>` and `<meta name="description">` tags. None of
