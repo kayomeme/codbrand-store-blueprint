@@ -196,6 +196,12 @@ proof — reviews, real photography, real detail.
 Avoid the generic-template smell: stock imagery with no relationship to the products, claims with no
 specifics, and a hero that says nothing a competitor could not also say.
 
+**A "see all" link needs a page of its own.** On a CodBrand store `/product/` is the store's category design with no
+category: titled "Products", showing the listing design's first page (its `posts_per_page`) and its pager
+(`pagination_type`, often none). Build the page a "see all" promises — a products listing of every product, under your
+heading — and link to that; or set that listing's count and pager first. Open the link before you hand over. *Measured on
+one store: "All 20 picks" went to `/product/`: 12 of the 20, no pager, under "Products".*
+
 ## Asking, and filling what you were not told — the detail
 
 Moved here verbatim from `SKILL.md` → "Asking" (14-11-2026).

@@ -10,7 +10,8 @@
  * guide, an order summary, an FAQ) ONCE WITH EVERY ONE OPEN AND ONCE WITH EVERY ONE CLOSED — a closed
  * block draws its borders somewhere else than an open one. It reads `open_collapsibles` back to you so
  * you can see which state you measured. Then once more with each overlay open (the cart drawer, the
- * checkout popup, a quick view): what an overlay holds is checked only while it is open. Set
+ * checkout popup, a quick view): what an overlay holds is checked only while it is open, and with
+ * `window.CL_JOINS_OPEN` set (below) only the overlay is judged — the page under it has its own run. Set
  * `window.CL_JOINS_RHYTHM = { stack, section, edge }` first — the store's two spacing steps and its edge
  * inset at this width (references/palette.md → "Density") — for off-rhythm and edge-mismatch. And name what
  * you measure: `window.CL_JOINS_PAGE` = "home", "category", "product", "cart" or "checkout", and with an
@@ -62,7 +63,10 @@
  *   small-target        on a phone (under 768px wide), a control a shopper taps — a link, a button, a field,
  *                       a toggle, a colour swatch's label over its hidden radio — under 44 × 44px in either
  *                       direction (Apple: 44 × 44pt; WCAG 2.5.5: 44; Material: 48dp). The icon keeps its size;
- *                       its box reaches 44 through padding. A link inside a sentence is not one, and identical
+ *                       its box reaches 44 through padding. The target is what a tap there reaches: its labels,
+ *                       a link stretched over its row, a pointer card or a drawn field box holding only it. Not
+ *                       one: a link inside a sentence, and a control whose job a 44px one beside it does (a
+ *                       link with the same address, pager dots between previous / next arrows). Identical
  *                       targets are one finding with their count. Measured on one store: about 20 controls
  *                       under 44px on a phone — header icons 20 to 22px tall, a card's "+" 30 × 26, colour
  *                       dots 10 × 10, a drawer's × 16 × 22, footer links 18px tall.
@@ -102,7 +106,9 @@
 
   const W = document.documentElement.clientWidth || window.innerWidth;
   const q = (sel, root = document) => root.querySelector(sel);
-  const qa = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  // Every query goes through the run's scope: the whole page, or, with an overlay open, only that overlay (below).
+  let inScope = () => true;
+  const qa = (sel, root = document) => Array.from(root.querySelectorAll(sel)).filter((el) => inScope(el));
   const box = (el) => el.getBoundingClientRect();
   const round = (n) => Math.round(n);
   const text = (el) => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -119,6 +125,20 @@
     const r = box(el);
     return r.width > 0 && r.height > 0;
   };
+  // ── an overlay open: judge only it ────────────────────────────────────────────────────────────
+  // A panel open over the page: a fixed box at least 200 × 200px holding text, on the screen (the outermost of them).
+  // When you say one is open (`window.CL_JOINS_OPEN`) and one is, every check reads only what is inside it: the page
+  // under it is measured in its own run, with nothing open. Measured on one store: with the cart drawer open, text
+  // 7px from a line on the product page UNDER the drawer was reported.
+  const panelsFound = Array.from(document.querySelectorAll('body *')).filter((el) => {
+    if (getComputedStyle(el).position !== 'fixed' || !isShown(el)) return false;
+    const r = box(el);
+    return r.width >= 200 && r.height >= 200 && r.left < W && r.right > 0 && r.top < window.innerHeight && r.bottom > 0
+      && /[\p{L}\p{N}]/u.test(el.innerText || el.textContent || '');
+  });
+  const openPanels = panelsFound.filter((el) => !panelsFound.some((o) => o !== el && o.contains(el)));
+  const scoped = typeof window.CL_JOINS_OPEN === 'string' && window.CL_JOINS_OPEN.trim() !== '' && openPanels.length > 0;
+  if (scoped) inScope = (el) => openPanels.some((p) => p === el || p.contains(el));
   const parseColour = (v) => {
     const m = String(v).match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)/);
     if (!m) return null;
@@ -304,7 +324,7 @@
   const kindOf = (el) => `${el.tagName}.${typeof el.className === 'string' ? el.className.trim().split(/\s+/)[0] || '' : ''}`;
   const overlapY = (a, b) => Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
   const cardLists = []; // every list of two or more cards of one kind, for side-gap and overflow below
-  for (const list of new Set(qa('body *').map((el) => el.parentElement).filter(Boolean))) {
+  for (const list of new Set(qa('body *').map((el) => el.parentElement).filter((el) => el && inScope(el)))) {
     const byKind = new Map();
     for (const c of Array.from(list.children)) {
       if (SKIP.has(c.tagName.toUpperCase()) || !isShown(c)) continue;
@@ -705,6 +725,67 @@
       || el.getAttribute('placeholder') || (img && img.alt) || (ctl && (ctl.getAttribute('aria-label') || ctl.value)) || el.value || '')
       .replace(/\s+/g, ' ').trim().slice(0, 30);
   };
+  // WHAT A TAP THERE REACHES (WCAG's target: "region of the display that will accept a pointer action"), beyond the
+  // control's own box and its labels. Measured on one store at 390, each proved by a real tap: a checkout field's
+  // bordered 52px box around an 18px borderless input; quantity-offer and shipping cards (`cursor: pointer`) around a
+  // 13px radio; a partner link stretched over its 322 × 121 row by an `::after { position: absolute; inset: 0 }`.
+  // (1) A STRETCHED LINK: a `::before` / `::after` placed absolutely over its containing block, less its insets.
+  const px = (v) => (/^-?[\d.]+px$/.test(v) ? parseFloat(v) : null);
+  const stretched = (el) => {
+    let best = null;
+    for (const pseudo of ['::before', '::after']) {
+      const cs = getComputedStyle(el, pseudo);
+      if (!cs.content || cs.content === 'none' || cs.content === 'normal' || !/^(absolute|fixed)$/.test(cs.position)) continue;
+      const [t, r, b, l] = [cs.top, cs.right, cs.bottom, cs.left].map(px);
+      if ([t, r, b, l].some((v) => v === null)) continue;
+      let cb = el;
+      if (cs.position === 'absolute') while (cb.parentElement && cb !== document.body && getComputedStyle(cb).position === 'static') cb = cb.parentElement;
+      const c = cs.position === 'fixed' ? { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight } : box(cb);
+      const w = c.right - r - (c.left + l);
+      const h = c.bottom - b - (c.top + t);
+      if (w > 0 && h > 0 && (!best || w * h > best.width * best.height)) best = { width: w, height: h };
+    }
+    return best;
+  };
+  // (2) THE BOX THAT FORWARDS A TAP: up from the control, while an ancestor holds no other control (its labels aside),
+  // the largest one that shows a pointer (a card that selects it) or draws a box while the control draws none of its
+  // own (the box IS the field a shopper sees). A field sharing its box with a button is not one: only the field takes
+  // a tap there.
+  const forwardBox = (el) => {
+    const own = new Set([el, ...Array.from(el.labels || [])]);
+    const drawsNone = !controlShows(el, getComputedStyle(el));
+    let best = null;
+    for (let a = el.parentElement, i = 0; a && a !== document.body && i < 6; a = a.parentElement, i++) {
+      if (Array.from(a.querySelectorAll(TAPPABLE)).some((o) => !own.has(o) && !o.contains(el) && !unseen(o))) break;
+      const cs = getComputedStyle(a);
+      if (cs.cursor === 'pointer' || (drawsNone && drawsBox(a))) best = box(a);
+    }
+    return best;
+  };
+  const big = (r) => !!r && round(r.width) >= 44 && round(r.height) >= 44;
+  // Another control doing the same job beside it (WCAG's "Equivalent" exception: "the function can be achieved through
+  // a different control on the same page that meets this criterion"): (a) a link with the same address whose target is
+  // 44 × 44 or more, within 48px — a category chip's title beside its 54 × 54 image link; (b) a row of identical small
+  // buttons (pager dots) with a 44 × 44 button of another kind before it and one after it in its group — a slider's
+  // dots between its previous / next arrows. Measured on the same store.
+  const gapBetween = (a, b) => Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right), Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom));
+  const doneBeside = (el) => {
+    const r = box(el);
+    if (el.tagName === 'A' && el.href) {
+      if (qa('a[href]').some((o) => o !== el && o.href === el.href && !unseen(o) && big(hitBox(o)) && gapBetween(r, box(o)) <= 48)) return true;
+    }
+    const kin = (o) => o.tagName === el.tagName && kindOf(o) === kindOf(el);
+    const row = el.parentElement ? Array.from(el.parentElement.children).filter(kin) : [];
+    if (row.length >= 2 && row.every((o) => !big(hitBox(o)))) {
+      const span = row.map(box).reduce((x, y) => ({ left: Math.min(x.left, y.left), right: Math.max(x.right, y.right), top: Math.min(x.top, y.top), bottom: Math.max(x.bottom, y.bottom) }));
+      for (const g of [el.parentElement, el.parentElement.parentElement].filter(Boolean)) {
+        const steps = qa('button, [role="button"]', g).filter((o) => !kin(o) && !unseen(o) && big(hitBox(o))).map(box);
+        const across = span.right - span.left >= span.bottom - span.top;
+        if (steps.some((s) => (across ? s.right <= span.left + 1 : s.bottom <= span.top + 1)) && steps.some((s) => (across ? s.left >= span.right - 1 : s.top >= span.bottom - 1))) return true;
+      }
+    }
+    return false;
+  };
   if (phone) {
     const groups = new Map();
     for (const el of qa(TAPPABLE)) {
@@ -714,7 +795,7 @@
       if (unseen(el) || inClosedPanel(el) || getComputedStyle(el).pointerEvents === 'none') continue;
       if (el.tagName === 'A' && inRunningText(el)) continue;
       const parts = [el, ...Array.from(el.labels || []).filter((l) => !unseen(l))].map((p) => ({ el: p, r: hitBox(p) }));
-      if (parts.some((p) => round(p.r.width) >= 44 && round(p.r.height) >= 44)) continue;
+      if (parts.some((p) => big(p.r)) || big(stretched(el)) || big(forwardBox(el)) || doneBeside(el)) continue;
       const t = parts.reduce((x, y) => (y.r.width * y.r.height > x.r.width * x.r.height ? y : x));
       const [w, h] = [round(t.r.width), round(t.r.height)];
       const cls = typeof t.el.className === 'string' ? t.el.className.trim().split(/\s+/)[0] || '' : '';
@@ -747,7 +828,7 @@
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const el = n.parentElement;
-      if (!el || !/[\p{L}\p{N}]/u.test(n.nodeValue) || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|OPTION|TITLE)$/.test(el.tagName) || hidden(el)) continue;
+      if (!el || !inScope(el) || !/[\p{L}\p{N}]/u.test(n.nodeValue) || /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|OPTION|TITLE)$/.test(el.tagName) || hidden(el)) continue;
       const range = document.createRange();
       range.selectNodeContents(n);
       const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
@@ -1156,13 +1237,8 @@
   const openCollapsibles = shownOpen;
   const collapsibles = shownCollapsibles.length;
   // What was measured, for the hand-over gate: the page type and the overlay you opened, as you set them
-  // (`window.CL_JOINS_PAGE`, `window.CL_JOINS_OPEN`), and the panels this script itself sees open over the page —
-  // a fixed box at least 200 × 200px holding text, on the screen (the outermost of them).
-  const panels = qa('body *').filter((el) => {
-    if (getComputedStyle(el).position !== 'fixed' || hidden(el)) return false;
-    const r = box(el);
-    return r.width >= 200 && r.height >= 200 && r.left < W && r.right > 0 && r.top < window.innerHeight && r.bottom > 0 && /[\p{L}\p{N}]/u.test(text(el));
-  });
+  // (`window.CL_JOINS_PAGE`, `window.CL_JOINS_OPEN`), the panels this script itself sees open over the page (see "an
+  // overlay open" at the top), and whether it judged only the overlay.
   const said = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
   const result = {
     tool: 'joins.js',
@@ -1170,7 +1246,8 @@
     measured_at: new Date().toISOString(),
     page_type: said(window.CL_JOINS_PAGE),
     opened: said(window.CL_JOINS_OPEN),
-    overlays_open: panels.filter((el) => !panels.some((o) => o !== el && o.contains(el))).map(describe),
+    overlays_open: openPanels.map(describe),
+    judged: scoped ? 'the open overlay only' : 'the whole page',
     viewport: { width: window.innerWidth, height: window.innerHeight },
     collapsibles, open_collapsibles: openCollapsibles,
     rhythm: rhythm ? { stack: Number(rhythm.stack), section: Number(rhythm.section) || null, edge: edgeWant } : (edgeWant ? { edge: edgeWant } : null),

@@ -190,9 +190,14 @@ Record them in the blueprint's `density` with where they came from. There is no 
 its own: write them into the settings that exist — a block's space above it is its container `*_style`
 `margin-top`, a card's inside space and corners are its preset's padding and radius, in `css_default`
 and `css_mobile`; the edge inset is the store's side gutter, desktop and phone (`store_settings`, the global
-layout: `/docs/store_settings`), and a design laid out in another width mode keeps its content on it too. Then check
-them: run `scripts/joins.js` with `window.CL_JOINS_RHYTHM = { stack, section, edge }` set first — `edge` the inset
-at the width you measure (the phone number under 768px) — and it reports every gap between cards or sections that
+layout: `/docs/store_settings`), and a design laid out in another width mode keeps its content on it too. Where the
+store's step is smaller on phones (the reference measured at 390 says so, or the blueprint records a phone step) and a
+style key has no phone value of its own, write the step as `clamp(<phone>px, <desktop ÷ 14.4>vw, <desktop>px)` — for
+12 and 16, `clamp(12px, 1.12vw, 16px)`: 12px at 390, 16px at 1440; style values accept `clamp()` (`/docs/style_brushes`).
+*Measured on one store: product-grid, reviews-list, checkout and offer gaps with no phone value drew 16–24px on phones,
+101 off-rhythm findings; with `clamp()`, 5.* Then check
+them: run `scripts/joins.js` with `window.CL_JOINS_RHYTHM = { stack, section, edge }` set first — each the value
+at the width you measure (the phone numbers under 768px) — and it reports every gap between cards or sections that
 is neither step, and a header, trail, title or footer off the edge. *Measured on one build, with the word and no
 numbers: 0, 4 and 41px between the blocks of one checkout; on another, with the numbers recorded and applied to
 nothing: header 72px from the edge, trail 48, title 64.*
