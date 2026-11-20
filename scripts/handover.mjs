@@ -155,6 +155,9 @@
  *      a desktop width, every overlay the store has open, every finding fixed or given a reason (see
  *      checkJoins()). Text left at a text design of 0 on a dark page is warned about beside it.
  *
+ *  29. A FONT ON GOOGLE. An active Google font still loading from Google (`hosting: google`) is named, with the
+ *      fix (see checkFontHosting()).
+ *
  * EVERY LIST IS WALKED, page by page. The api returns at most 100 rows a page and silently clamps a
  * larger `per_page`, so reading a list once used to check the first 100 rows and call it the table.
  *
@@ -1584,6 +1587,32 @@ async function checkTextAtZero(designs, pageBackgrounds) {
     '    At 0 a text takes its colour from what is around it, and where nothing around it sets one, from the theme\'s\n' +
     '    page text, which no door sets — measured on one dark store: #000 on #151517. Pick a text design for each one\n' +
     '    a shopper sees, or check it shown in the browser (joins.js reports `low-contrast`).'];
+}
+
+/**
+ * 29 — A GOOGLE FONT STILL LOADING FROM GOOGLE (a warning). A Google font row carries `hosting`: `local` (the store
+ * copied its files and serves them; no visitor connects to Google) or `google`. A NEW font defaults to `local`, but a
+ * re-point keeps the row's old value and the two shipped rows read `google` (the plugin's seed carries none and the
+ * column defaults to it), so a build that re-points `font1` without `"hosting": "local"` leaves the brand face on
+ * Google. Measured on one store: its display font, a re-pointed shipped row, loaded from fonts.googleapis.com on
+ * every page. A warning, not a failure: when the store cannot copy the files (a 503 in the apply's results), Google
+ * is the right end state — told to the merchant. Only active fonts: an inactive one loads nothing.
+ */
+async function checkFontHosting(call, R) {
+  const read = await walk(call, pathFor('design_controls_font_manager', 'design_controls/font_manager', R));
+  if (read.error) return { notes: [`fonts NOT checked for where they load from: could not read the font list — ${read.error}`] };
+  const google = read.rows.filter((f) => String(f.type ?? '') === 'google' && String(f.is_active ?? 'yes') !== 'no');
+  if (!google.length) return { notes: [] };
+  if (!google.some((f) => 'hosting' in f)) {
+    return { notes: ['fonts NOT checked for where they load from: this plugin reports no `hosting`, so every Google font\n' +
+      '    loads from Google there — a plugin update serves them from the store.'] };
+  }
+  const onGoogle = google.filter((f) => String(f.hosting ?? '') === 'google');
+  if (!onGoogle.length) return { notes: [], passed: `every Google font is served from the store (${google.length} checked)` };
+  return { notes: [`${onGoogle.length} font(s) load from Google — every visitor's browser contacts Google for them:\n` +
+    onGoogle.map((f) => `        ${f.name} "${clip(String(f.title ?? ''), 40)}" (${clip(String(f.font_family ?? ''), 40)})`).join('\n') + '\n' +
+    '    Send each again with `"hosting": "local"` (references/palette.md → "Fonts"). If its result comes back with\n' +
+    '    `"http": 503` and the copy failed, tell the merchant that font loads from Google, and why.'] };
 }
 
 /* The lists whose cards stand side by side or one under another: the key holding the space between the
@@ -3398,6 +3427,9 @@ async function main(base) {
     const bands = await checkBands(designs, presetsById, resolve, pageBackgrounds);
     problems.push(...bands.problems);
     notes.push(...await checkTextAtZero(designs, pageBackgrounds));
+    const fonts = await checkFontHosting(call, R);
+    notes.push(...fonts.notes);
+    if (fonts.passed) line(true, fonts.passed);
     if (!bands.problems.length) {
       line(true, `every coloured band has side padding on desktop and on phones (${bands.checked} card design use(s) checked)`);
       passed.push('every coloured band has side padding');

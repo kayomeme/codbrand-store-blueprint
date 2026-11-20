@@ -152,6 +152,18 @@ agrees with the presets.
   restyles every store. There, add the new face as its own font, and give each preset you use its own
   copy with `font-family` in `css_default`, which beats the base.
 
+**Serve every Google font from the store: send `"hosting": "local"` on each font write** — a re-point of `font1` or
+`font2` as much as a new font. The store then copies the files once and visitors never connect to Google (faster
+first paint; no visitor data sent to Google). A new font defaults to `local`, but a re-point keeps the row's old
+value, and the two shipped rows read `google`: re-pointed without it, the brand face stays on Google. **Read each
+result of the `apply`** — it answers 200 even when a font is refused. A result with `"http": 503` saved nothing: when
+its reason is the font (Google answered an error: check the family and the weights), fix that and send again; when
+the copy failed (Google unreachable, the uploads folder not writable), send the font again with `"hosting":
+"google"` and tell the merchant in plain words that this font loads from Google, so every visitor's browser contacts
+Google for it, and that "This store" in the font's settings fixes it once the server can reach Google. *Measured: one
+build re-pointed a shipped row and its display font stayed on Google on every page; another store, served locally,
+went from a 2.9s to a 1.4s first contentful paint.* `handover.mjs` names every font still on Google.
+
 Pick **two**: a heading face and a body face. Map from the archetype:
 
 | archetype | heading | body |
