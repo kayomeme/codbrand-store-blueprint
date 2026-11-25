@@ -129,7 +129,7 @@ The archetype list is deliberately dynamic (see `archetypes.md`). A blueprint th
 | `palette` | 26 semantic slots, filled by role |
 | `fonts` | `{ "heading": …, "body": … }` |
 | `icon_style` | the icon family |
-| `density` | the four spacing numbers — edge inset, stack, section, radius — and where they came from (`palette.md` → "Density") |
+| `spacing` | the density, the Spacing designs the build changed (from what, to what), the rulers, `T`, the reading line, and every spacing decision the merchant took — below, and `spacing.md` |
 | `page_list` | which pages this store needs, and why each |
 | `page_structure` | per page: purpose, sections, what each section needs |
 | `copy` | the translatable settings keys, in their language |
@@ -160,6 +160,37 @@ applied), and fails when the store disagrees. Write one key per checklist row: `
 may follow (`"on — sizes on every product"`). A key it does not know, or a value that is neither, is
 reported as not reconciled rather than checked. The settings behind each row are in `archetypes.md` →
 "What switches each feature".
+
+### `spacing` — what the build changed, and what the merchant decided
+
+The steps themselves live on the store (its Spacing designs, `spacing.md`); the blueprint records the choice and the
+exceptions, so a re-run and the live check read the same thing:
+
+```jsonc
+"spacing": {
+  "status": "inferred",
+  "why": "Caregiver reads airy; the reference keeps 24px between its product cards at 1440, 20 at 390",
+  "value": {
+    "density": "airy",
+    "source": "the reference, measured at 1440 and 390",   // or "density" when nothing was measured
+    "steps": [
+      { "design": 453, "title": "Item", "from": "16 / 12", "to": "24 / 20", "why": "the reference's card gap" }
+    ],
+    "rulers": [ { "name": "reading column", "width": 672, "align": "centre" } ],
+    "T": 1.15,                 // the contrast that makes a background a box (L2); 1.15 unless the merchant chose otherwise
+    "line_length": 80,         // characters a line of body text (L7)
+    "decisions": [
+      { "id": "spacing-1", "law": "L5", "where": "footer bottom bar", "why": "the merchant wants it centred under a left-aligned footer", "by": "the merchant", "date": "2026-11-25" }
+    ]
+  }
+}
+```
+
+**A decision is the merchant's, never yours.** It is the only way a live-check finding stays without a fix besides a
+known plugin limit (`spacing.md` → "The check"): `handover.mjs` accepts `{ "decision": "spacing-1" }` only when that id
+is here. Ask the merchant in plain words — what the check found, the fix, what keeping it costs — and record their
+answer with the date. An id is never reused; when the merchant changes their mind, fix the finding and remove the
+decision.
 
 ### `language` carries a script, and it is not decoration
 

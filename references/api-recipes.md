@@ -780,8 +780,8 @@ where their customers are.
 Check the things a status code cannot: does the palette read; is the price legible; does the buy
 button look like a buy button; does the page hold together on a phone.
 
-**Run the browser pass, then the gate**, on every build — reference site or not: `scripts/joins.js` on each
-page type, width and overlay, each result saved in one folder (`order-of-work.md` → phase 10), then:
+**Run the live check, then the gate**, on every build — reference site or not: `scripts/live-check.mjs <site-url>
+<api-key>` (every page, four widths, each overlay; its folder, `spacing.md` → "The check"), then:
 
 ```
 node scripts/handover.mjs <site-url> <api-key> --joins <folder>

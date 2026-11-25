@@ -530,6 +530,23 @@ async function main(base) {
   console.log('    every computed-style row `unmeasurable`, and tell the merchant which parts of');
   console.log('    their reference went unchecked. An unmeasurable row never counts as a match.');
 
+  /*
+   * The live check (phase 10) drives a Chrome on this machine. Detected, not asked: it is a file on disk. Its absence
+   * does not stop a build — joins.js pasted by hand into each page is the slower way — but it is said now, not at
+   * the hand-over.
+   */
+  const browsers = [process.env.CHROME, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    `${process.env.LOCALAPPDATA || ''}/Google/Chrome/Application/chrome.exe`, 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium'].filter(Boolean);
+  const chrome = browsers.find((p) => existsSync(p));
+  console.log('\nThe live check (phase 10, scripts/live-check.mjs):\n');
+  if (chrome) console.log(`  ✓ a browser it can drive: ${chrome}`);
+  else {
+    console.log('  ! no Chrome, Chromium or Edge found (set CHROME=<its path> if it is elsewhere): the live check will be');
+    console.log('    joins.js pasted by hand into every page, at every width (references/spacing.md → "The check").');
+  }
+
   if (!companion) {
     console.error('\nSTOP. The companion skill is missing.');
     console.error('This skill decides WHAT the store should be; `codbrand-content-builder` renders');

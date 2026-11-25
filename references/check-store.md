@@ -81,6 +81,10 @@ Write everything in English, whatever language the store is in: the report is fo
 - **Verify, never just agree.** Reproduce the point on the live store before you confirm it. Open
   the page in a browser and measure what actually renders (computed styles, sizes at 1440px and at
   390px wide), and read the settings back through the api. If the user is wrong, say so and show why.
+- **A spacing point is verified with the live check**, not by eye: `scripts/live-check.mjs` at 390, 768, 1024 and
+  1440 on that page, its strips opened (`spacing.md` → "The check"). Name the law it breaks. **A spacing fault the
+  user marks that the check does not report is a gap in the check first** — this skill's live check, with your
+  measurement — whatever else caused it.
 - **The question that matters most: is it really missing, or does it already exist?** Before you
   call anything missing, check the api (`GET /me`, `GET /openapi`, `GET /docs/{slug}`, and the
   `settings_schema` a design returns) and the skills (this skill's SKILL.md, references and

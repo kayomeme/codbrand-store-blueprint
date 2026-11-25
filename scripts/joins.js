@@ -1,110 +1,74 @@
 /**
- * joins.js — the JOINS between a page's blocks, checked mechanically instead of by eye.
+ * joins.js — the spacing laws and the page checks, measured on the page a shopper sees.
  *
- * Paste this whole file into the browser console of the page you are checking, or run it through your
- * browser tool's evaluate, like measure.js. It prints its findings as JSON and returns them.
- * **Zero findings is the pass.** A finding you decide is right for this design needs a reason, in
- * your report, per finding.
+ * scripts/live-check.mjs runs it on every page of the store at 390, 768, 1024 and 1440 and saves each result and its
+ * strips. By hand (a store Chrome cannot open): paste this whole file into the page's console, or run it through your
+ * browser tool's evaluate, with first:
+ *   window.CL_SPACING = { designs: [...], T, line_length }  the store's Spacing designs, each { id, title, category,
+ *                       computer, phone } (GET design_controls/presets?type=spacing), and the blueprint's T and reading
+ *                       line. Without it the plugin's shipped steps are used, and the result says so (the gate refuses it).
+ *   window.CL_JOINS_PAGE = "home" | "category" | "product" | "page" | …   what this page is;
+ *   window.CL_JOINS_OPEN = "quick view" | "cart drawer" | "checkout popup"  with an overlay open: only the overlay is
+ *                       judged (the one on top, when two are open) — the page under it has its own run.
+ * Measure a phone width in a phone's browser (the store prints other HTML for phones), and at an exact width (a frame:
+ * references/spacing.md → "The check"). It prints the result as JSON and returns it; save each as a .json file in one
+ * folder for `handover.mjs --joins <folder>`. Zero findings is the pass; a finding stays only with a known plugin
+ * limit's id or the merchant's decision id in the result's "accepted" (references/spacing.md).
  *
- * Run it on every page you changed, at 1440×900, 768×1024 and 390×844, and on a page with collapsibles (a size
- * guide, an order summary, an FAQ) ONCE WITH EVERY ONE OPEN AND ONCE WITH EVERY ONE CLOSED — a closed
- * block draws its borders somewhere else than an open one. It reads `open_collapsibles` back to you so
- * you can see which state you measured. Then once more with each overlay open (the cart drawer, the
- * checkout popup, a quick view): what an overlay holds is checked only while it is open, and with
- * `window.CL_JOINS_OPEN` set (below) only the overlay is judged — the page under it has its own run. Set
- * `window.CL_JOINS_RHYTHM = { stack, section, edge }` first — the store's two spacing steps and its edge
- * inset at this width (references/palette.md → "Density") — for off-rhythm and edge-mismatch. And name what
- * you measure: `window.CL_JOINS_PAGE` = "home", "category", "product", "cart" or "checkout", and with an
- * overlay open `window.CL_JOINS_OPEN` = "quick view", "cart drawer" or "checkout popup". Save each result it
- * prints as a .json file in one folder: `handover.mjs --joins <folder>` reads them, and fails without them.
+ * THE SPACING LAWS (references/spacing.md) — measured between inks (a line of text by its line box, a photo, a painted
+ * box seen as a box), on both axes, inside each scroll container, at the store's steps for this width:
+ *   L1 never touch       neighbours closer than 4px or overlapping; boxes touching side by side or one under the other
+ *                        (a seam no designed join explains); cards of one list with 0px between them; two lines with
+ *                        nothing between them; text under 8px from a line another block draws, under 4px from its own.
+ *                        Measured: a reviews summary ending at 368px and the first review card starting at 368.
+ *   L2 a box is seen     a background under T : 1 (1.15) with no border or shadow is no box: content it insets is off
+ *                        the ruler beside it; a seen box keeps its content on one inner edge, 4px or more from its
+ *                        sides, 8px from its photo; a control is wider inside than tall. Measured: a "Where to buy"
+ *                        box at 1.08 : 1, its title 18px and its table 30px in.
+ *   L3 proximity         a group's items no further apart than its heading is from them; a heading nearer what it
+ *                        labels than what came before; a box's inset no larger than the space between boxes.
+ *                        Measured: footer links 38px apart under a heading 28px away.
+ *   L4 same job          siblings of one kind keep one gap; columns side by side keep one item gap; collapsibles in one
+ *                        stack share one look (header, chevron, divider, gap, body padding).
+ *   L5 rulers            the header, trail, page title and footer on the page edge; the blocks of one column on one
+ *                        edge (or one inset inside a seen box); logical in a right-to-left store. Measured: header,
+ *                        trail and title at 72, 48 and 64px.
+ *   L6 scale only        every gap one of the store's steps at this width (±0.5px), 4px inside one part, 2 / 6px
+ *                        inside a control; the nearest step named. Measured: 0, 4 and 41px in one checkout pop-up.
+ *   L7 build rule        body text at most 80 characters a line (or the blueprint's line_length).
+ *   L8 overlays          badges and labels over a photo: one distance from the edges for every one of a kind, never
+ *                        touching. Measured: a "Sold out" badge 8px from the corner on two cards, 0 on a third.
+ *   L9 fixed, floating   a floating button on the page edge, over no other floating thing, and at the page end over
+ *                        no content. Measured: a WhatsApp button 16px from the window over "How we earn money".
  *
- * WHAT IT FLAGS — each one survives every per-setting check and every screenshot of a block alone:
+ * THE PAGE CHECKS — unchanged by the laws:
+ *   browser-default     a heading's margin or weight, or a link's colour, from the browser's own stylesheet.
+ *   dead-anchor         an in-page link `#id` to nothing, or to something not rendered.
+ *   soft-image          a photo with too few pixels for its box on this screen or a 2× phone (Lighthouse's rule).
+ *   small-target        on a phone, a control under 44 × 44px — what a tap reaches: its labels, a stretched link, a
+ *                       box forwarding the tap, a tap area drawn by ::before / ::after.
+ *   dead-scoped-css     a design's custom CSS rule that can never apply (it aims at a nested design).
+ *   low-contrast        text under WCAG 1.4.3's 4.5 : 1 (3 : 1 large) against what is painted behind it.
+ *   overflow            the page wider than the window, a block past its edge, a control past its card (not what a
+ *                       slider's track clips), text past its box, a word broken mid-word.
  *
- *   touching-boxes      two visible boxes stacked one on the other with 0px between them, where at
- *                       least one draws a border (or casts a shadow) on that side or their backgrounds
- *                       differ. Measured: an order summary switched on sat flush on the form box below
- *                       it, its closed state drawing its bottom border along the box's top edge. Not a
- *                       seam: a lower box's own divider with clear space on both sides of it, and a box
- *                       that paints nothing on the seam and keeps its visible content away from it — 8px
- *                       below a box, 24px above one.
- *   touching-cards      cards of one list — siblings of one kind, each drawing its own box (a background, a
- *                       shadow or borders on both sides; a row drawing only a line above or below is a row,
- *                       not a card), 80×60px or more — with 0px between them, side by side or one under the
- *                       next: a grid or a slider whose gap is 0. Measured: review cards touching in a row of
- *                       three and in a slider for a month, while every other check passed.
- *   stacked-dividers    two horizontal rules (a top/bottom border with no side borders, or an <hr>)
- *                       within 24px of each other, from two different boxes — or a rule within 12px of
- *                       a bordered box's edge. Two bordered cards 16px apart are a list, not this, and a
- *                       control drawn as a box (a button, a pill, a field) is no line at all. Measured:
- *                       a toggle's bottom rule, then a summary header's top AND bottom rules, then the
- *                       form's border: four lines in under 100px, each block styled as if alone.
- *   browser-default     a heading whose margin or weight, or a link whose colour, comes from the
- *                       browser's own stylesheet: no rule of the page sets it. Measured: two section
- *                       titles taking 1em margins from the browser, and a link in browser blue.
- *                       Where a stylesheet cannot be read (another origin), a finding is marked
- *                       `certain: false` — "could not tell", never "clean".
- *   dead-anchor         an in-page link `href="#id"` whose target is not on the page, or is not rendered
- *                       (switched off, hidden). An empty or 0-height target is one (a skip link's focus
- *                       target). Measured: a summary linking to a shipping block that was switched off.
- *   soft-image          a photo whose file has too few pixels for the box it is drawn in, on this screen
- *                       or on a 2× phone (Lighthouse's rule). Measured: a product gallery drawing 800px
- *                       photos 710px wide, soft on every phone. Scroll the page through first, so lazy
- *                       photos have loaded.
- *   off-rhythm          two cards or sections stacked in one column whose gap is neither of the store's
- *                       two spacing steps (only with CL_JOINS_RHYTHM set). Measured: 0, 4 and 41px
- *                       between the blocks of one checkout popup.
- *   stack-mismatch      collapsibles lined up one under another (a product's description and
- *                       specifications, and a block placed with them) that do not share one look:
- *                       header height, chevron size and colour, the divider under the header, the rule
- *                       between them, the gap above and, open, the body's padding. Measured: a delivery
- *                       block placed under two product sections drew a 22px header with no divider, a
- *                       14px grey chevron, a 12px gap and an unpadded body, against 59px, a 1px divider,
- *                       18px, 24px and 16px.
- *   small-target        on a phone (under 768px wide), a control a shopper taps — a link, a button, a field,
- *                       a toggle, a colour swatch's label over its hidden radio — under 44 × 44px in either
- *                       direction (Apple: 44 × 44pt; WCAG 2.5.5: 44; Material: 48dp). The icon keeps its size;
- *                       its box reaches 44 through padding. The target is what a tap there reaches: its labels,
- *                       a link stretched over its row, a pointer card or a drawn field box holding only it. Not
- *                       one: a link inside a sentence, and a control whose job a 44px one beside it does (a
- *                       link with the same address, pager dots between previous / next arrows). Identical
- *                       targets are one finding with their count. Measured on one store: about 20 controls
- *                       under 44px on a phone — header icons 20 to 22px tall, a card's "+" 30 × 26, colour
- *                       dots 10 × 10, a drawer's × 16 × 22, footer links 18px tall.
- *   dead-scoped-css     a design's custom CSS rule that can never apply. The store prints each design's CSS
- *                       inside `@scope ([cl-design="…"]) to ([cl-design])`, which stops at every design nested
- *                       in it: a rule matching nothing in its own design but something inside a nested one is
- *                       stored, printed and dead. Measured on one store: 15 rules of three listing designs
- *                       aimed at their cards' photo gallery (a 4:5 photo, image cover, the full-screen button,
- *                       the arrows' look and hover) — the gallery is a slider design of its own, and not one
- *                       of the 15 ever applied.
- *   edge-mismatch       the header, the breadcrumb trail, the page's title and the footer not starting their
- *                       content at one distance from the window's edge (±2px) — the header's; with
- *                       CL_JOINS_RHYTHM.edge, the header at that inset on a phone and never nearer the window
- *                       on a wider screen. Content inside a painted box narrower than the window starts where
- *                       the box does; a part aligned to the end (by its CSS, or starting past the window's
- *                       middle) is compared by its end with the header's end. Measured on one store at 1440: header
- *                       72px, trail 48px, title 64px.
- *   glued-to-line       text whose line sits under 8px from a line another block draws. Measured: a trail
- *                       2px under the header's bottom line.
- *   side-gap            inside the cards of a list, under 8px between a card's photo and its text (Material's
- *                       card pads its text 16dp). Measured: a product title 5px under its photo.
- *   low-contrast        text under WCAG 1.4.3's 4.5 : 1 (3 : 1 for 24px, or 18.5px bold) against what is painted
- *                       behind it. Text over a photo or a gradient is not judged; logos and disabled controls
- *                       are WCAG's exceptions. Measured: a quick view's text near-white on its white panel, 1.12 : 1.
- *   overflow            the page wider than the window or a block past its edge (WCAG 1.4.10), a control past
- *                       its card, text past its box, a word broken mid-word across two lines. Measured at 768:
- *                       card buttons out of their cards, product names cut mid-word.
+ * A collapsible is a <details>, a block whose header toggles it with aria-expanded, or an element carrying
+ * is_open="yes|no" whose first child is its header: measure every page once with all open and once all closed.
+ * With `CL_SPACING.draw` set the measurements are drawn on the page for screenshots (live-check.mjs's strips).
  *
- * A collapsible is a <details>, a block whose header toggles it with aria-expanded, or this plugin's own
- * toggle: an element carrying is_open="yes|no" whose first child is its header. To measure them open,
- * set every is_open to "yes" (and every <details> open); closed, to "no".
- *
- * No dependencies. It only reads the page.
+ * No dependencies. It only reads the page (and, with `draw`, adds one layer it removes on the next run).
  */
 (() => {
   'use strict';
 
   const W = document.documentElement.clientWidth || window.innerWidth;
+  // The page's content box, from L0 to R0. A classic scrollbar sits on the LEFT of a right-to-left page in Chrome on
+  // Windows and in any same-origin frame, so the content runs from 15px to the window's right edge. Measured from
+  // 0 … clientWidth on such a store (set to right-to-left), the header was "15px past the window's right edge" and
+  // "33px from the right edge" on every page, though it stood 48px from the content's edge.
+  const scrollbar = Math.max(0, window.innerWidth - W);
+  const L0 = scrollbar > 0 && document.documentElement.getBoundingClientRect().left >= scrollbar - 0.5 ? scrollbar : 0;
+  const R0 = L0 + W;
   const q = (sel, root = document) => root.querySelector(sel);
   // Every query goes through the run's scope: the whole page, or, with an overlay open, only that overlay (below).
   let inScope = () => true;
@@ -137,8 +101,18 @@
       && /[\p{L}\p{N}]/u.test(el.innerText || el.textContent || '');
   });
   const openPanels = panelsFound.filter((el) => !panelsFound.some((o) => o !== el && o.contains(el)));
-  const scoped = typeof window.CL_JOINS_OPEN === 'string' && window.CL_JOINS_OPEN.trim() !== '' && openPanels.length > 0;
-  if (scoped) inScope = (el) => openPanels.some((p) => p === el || p.contains(el));
+  // With two panels open, the one on top is the one judged: the checkout popup opened from the cart drawer leaves the
+  // drawer open under it, and judging both paired the popup's title with the drawer's header line (measured on one
+  // store at 390). On top: the panel the browser hits at its own centre; else the highest stacked, the last in the page.
+  const topPanel = (() => {
+    if (openPanels.length < 2) return openPanels[0] || null;
+    const hit = openPanels.find((p) => { const r = box(p); const e = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2); return e && p.contains(e); });
+    if (hit) return hit;
+    const z = (el) => { for (let a = el; a && a !== document.body; a = a.parentElement) { const v = parseInt(getComputedStyle(a).zIndex, 10); if (!Number.isNaN(v)) return v; } return 0; };
+    return openPanels.slice().sort((a, b) => z(a) - z(b) || (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)).pop();
+  })();
+  const scoped = typeof window.CL_JOINS_OPEN === 'string' && window.CL_JOINS_OPEN.trim() !== '' && !!topPanel;
+  if (scoped) inScope = (el) => topPanel === el || topPanel.contains(el);
   const parseColour = (v) => {
     const m = String(v).match(/rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)/);
     if (!m) return null;
@@ -163,7 +137,55 @@
   };
   const SKIP = new Set(['TD', 'TH', 'TR', 'THEAD', 'TBODY', 'TFOOT', 'TABLE', 'OPTION', 'SVG', 'PATH', 'IMG', 'BR', 'SCRIPT', 'STYLE']);
   const findings = [];
-  const flag = (check, where, detail, extra = {}) => findings.push(Object.assign({ check, where, detail }, extra));
+  const LAWS = { L1: 'never touch', L2: 'a box is a box only if it is seen', L3: 'proximity', L4: 'same job, same spacing',
+    L5: 'rulers', L6: 'scale only', L7: 'build rule', L8: 'overlays', L9: 'fixed and floating' };
+  // The spacing family names its law (`check: "L1"` …); the other checks keep their names.
+  // `at`: the element(s) a finding is about — drawn on the page for the strips, never in the saved result.
+  const anchors = new Map();
+  const flag = (check, where, detail, extra = {}) => {
+    const { at, ...rest } = extra;
+    const f = Object.assign({ check, where, detail }, LAWS[check] ? { law: check, family: 'spacing', law_name: LAWS[check] } : { family: 'other' }, rest);
+    findings.push(f);
+    if (at) anchors.set(f, [].concat(at).filter(Boolean));
+  };
+
+  // ── the store's steps ─────────────────────────────────────────────────────────────────────────
+  // A store's steps are its Spacing designs: each one value on computers and one on phones (phones: narrower than
+  // 768px, the plugin's one breakpoint, so 768 and 1024 are computers). Pass them as `window.CL_SPACING` (its
+  // `designs`: { id, title, category, computer, phone } read from the store; `T`, `rulers` and `line_length` from the
+  // blueprint's `spacing`). Without them this measures against the plugin's shipped designs and says so.
+  const SHIPPED = [[452, 'Small', 'between_horizontal', 8, 8], [453, 'Item', 'between_horizontal', 16, 12],
+    [454, 'Group', 'between_horizontal', 24, 20], [455, 'Grid', 'between_horizontal', 32, 24], [461, 'Small', 'between_vertical', 8, 8],
+    [462, 'Item', 'between_vertical', 16, 12], [463, 'Group', 'between_vertical', 24, 20], [464, 'Grid', 'between_vertical', 32, 24],
+    [458, 'Above block', 'space_above', 32, 24], [456, 'Above section', 'space_above', 64, 48], [459, 'Below block', 'space_below', 32, 24],
+    [460, 'Below section', 'space_below', 64, 48], [457, 'Edge', 'page_edge', 48, 16], [465, 'Inside small', 'inside', 8, 8],
+    [466, 'Inside', 'inside', 12, 12], [467, 'Inside large', 'inside', 16, 16]]
+    .map(([id, title, category, computer, phone]) => ({ id, title, category, computer, phone }));
+  const SP = window.CL_SPACING && typeof window.CL_SPACING === 'object' ? window.CL_SPACING : null;
+  const given = SP && Array.isArray(SP.designs) && SP.designs.some((d) => Number(d.computer) >= 0) ? SP.designs : null;
+  const DESIGNS = given || SHIPPED;
+  const phoneBelow = Number(SP && SP.phone_below) || 768;
+  const phoneSteps = window.matchMedia(`(max-width: ${phoneBelow - 0.02}px)`).matches;
+  const stepOf = (d) => Number(phoneSteps && d.phone !== null && d.phone !== undefined && d.phone !== '' ? d.phone : d.computer);
+  const valuesIn = (cats) => DESIGNS.filter((d) => !cats || cats.includes(d.category)).map(stepOf).filter((n) => n >= 0);
+  const STEPS = [...new Set(valuesIn(null))].sort((a, b) => a - b);
+  const EDGE = valuesIn(['page_edge'])[0] ?? (phoneSteps ? 16 : 48);
+  const SMALL = Math.min(...valuesIn(['between_horizontal', 'between_vertical']).filter((n) => n > 0), 8);
+  // The space inside one component (label → value, stars → count, icon → text) follows the store's steps by role, and
+  // the plugin's smallest role is 4px (`tight`); badge, count and chip insets are 4 × 8, 2 × 6 and 4 × 8.
+  const TIGHT = 4;
+  const INNER = [2, 4, 6];
+  const T = Number(SP && SP.T) > 1 ? Number(SP.T) : 1.15;
+  const onStep = (v, extra = []) => [...STEPS, ...extra].some((s) => Math.abs(v - s) <= 0.5);
+  const nearest = (v, extra = []) => [...STEPS, ...extra].reduce((b, s) => (Math.abs(s - v) < Math.abs(b - v) ? s : b), STEPS[0] ?? 0);
+  const stepName = (v) => { const d = DESIGNS.find((x) => stepOf(x) === v); return d ? `${d.title} ${v}px (#${d.id})` : `${v}px`; };
+  // The design a part belongs to (its `cl-design` attribute) and the block it sits in: where its spacing is set.
+  const designOf = (el) => {
+    const d = el && el.closest && el.closest('[cl-design]');
+    if (!d) return null;
+    const blk = el.closest('[cl-block]');
+    return `${d.getAttribute('cl-design')}${blk ? ` · ${blk.getAttribute('cl-block')}` : ''}`;
+  };
 
   // A visible box-shadow is an edge as well: a card drawn only by its shadow ends exactly where a border
   // would. Measured: a borderless white summary card, outlined by `box-shadow: 0 1px 3px` alone, sat
@@ -230,7 +252,7 @@
     let band = null;
     for (let a = el; a && a !== document.body; a = a.parentElement) {
       const r = box(a);
-      if (r.left <= 1 && r.right >= W - 1) band = a;
+      if (r.left <= L0 + 1 && r.right >= R0 - 1) band = a;
     }
     return band;
   };
@@ -303,8 +325,9 @@
   for (const s of seams) {
     if (reported.some((o) => Math.abs(o.y - s.y) <= 1 && (o.b === s.b || related(o.b, s.b)))) continue;
     reported.push(s);
-    flag('touching-boxes', `${describe(s.a.el)} → ${describe(s.b.el)}`,
-      `0px between them at y=${s.y + round(window.scrollY)}px${lineOn(s.a.bottom, 'upper')}${lineOn(s.b.top, 'lower')} — give one of them a margin, or set their spacing`);
+    flag('L1', `${describe(s.a.el)} → ${describe(s.b.el)}`,
+      `boxes touch one under the other: 0px between them at y=${s.y + round(window.scrollY)}px${lineOn(s.a.bottom, 'upper')}${lineOn(s.b.top, 'lower')} — give one of them a margin, or set their spacing`,
+      { rule: 'touching', measured: 0, expected: `at least ${TIGHT}px`, design: designOf(s.b.el), at: [s.a.el, s.b.el] });
   }
 
   // ── touching-cards ────────────────────────────────────────────────────────────────────────────
@@ -349,8 +372,9 @@
       }
       if (!pairs.length) continue;
       const [a, b, how] = pairs[0];
-      flag('touching-cards', describe(list),
-        `${pairs.length} pair(s) of its ${cards.length} cards touch with 0px between them (${describe(a.el)} and the next, ${how}), and each card draws its own box — set the list's space between cards to the design's, unless the reference joins its cards`);
+      flag('L1', describe(list),
+        `cards touch: ${pairs.length} pair(s) of its ${cards.length} cards with 0px between them (${describe(a.el)} and the next, ${how}), and each card draws its own box — set the list's space between cards to a step, unless the reference joins its cards`,
+        { rule: 'touching', measured: 0, expected: `a step (${STEPS.filter((v) => v > 0).join(' / ')}px)`, design: designOf(list), at: [a.el, b.el] });
     }
   }
 
@@ -374,12 +398,12 @@
     if (b.r.height < 24) continue; // a chip or an input: its own top and bottom are not dividers
     if (controlBox(b.el, b.r)) continue;
     const kind = b.sides ? 'outline' : 'divider';
-    if (b.top) lines.push({ y: b.r.top, left: b.r.left, right: b.r.right, el: b.el, side: 'top', kind });
-    if (b.bottom) lines.push({ y: b.r.bottom, left: b.r.left, right: b.r.right, el: b.el, side: 'bottom', kind });
+    if (b.top) lines.push({ y: b.r.top, w: b.top.w, left: b.r.left, right: b.r.right, el: b.el, side: 'top', kind });
+    if (b.bottom) lines.push({ y: b.r.bottom, w: b.bottom.w, left: b.r.left, right: b.r.right, el: b.el, side: 'bottom', kind });
   }
   for (const hr of qa('hr').filter(isShown)) {
     const r = box(hr);
-    if (r.width >= minWidth) lines.push({ y: r.top + r.height / 2, left: r.left, right: r.right, el: hr, side: 'rule', kind: 'divider' });
+    if (r.width >= minWidth) lines.push({ y: r.top + r.height / 2, w: 0, left: r.left, right: r.right, el: hr, side: 'rule', kind: 'divider' });
   }
   lines.sort((a, b) => a.y - b.y);
   for (let i = 0; i < lines.length; i++) {
@@ -392,9 +416,10 @@
       // 8px above a bordered offer card. Up to 12px (half the divider-to-divider distance).
       if ((a.kind === 'outline' || b.kind === 'outline') && b.y - a.y > 12) continue;
       const d = round(b.y - a.y);
-      flag('stacked-dividers', `${describe(a.el)} (${a.side}) + ${describe(b.el)} (${b.side})`,
+      flag('L1', `${describe(a.el)} (${a.side}) + ${describe(b.el)} (${b.side})`,
         d <= 1 ? `two lines lying on each other at y=${round(a.y + window.scrollY)}px — one block's divider directly on the next block's border`
-          : `two lines ${d}px apart at y=${round(a.y + window.scrollY)}px — two blocks each bring a divider to the same join; keep one`);
+          : `two lines ${d}px apart at y=${round(a.y + window.scrollY)}px with nothing between them — two blocks each bring a divider to the same join; keep one`,
+        { rule: 'doubled line', measured: d, design: designOf(b.el), at: [a.el, b.el] });
     }
   }
 
@@ -516,33 +541,6 @@
     }
   }
 
-  // ── off-rhythm ────────────────────────────────────────────────────────────────────────────────
-  // Only when you pass the store's spacing: `window.CL_JOINS_RHYTHM = { stack: 16, section: 72 }` before
-  // running this (the blueprint's density, palette.md → "Density"). Two cards or sections stacked in one
-  // column — siblings, at least one painting a background or an outline — sit the stack gap or the
-  // section gap apart (±2px); 0 is a join, which touching-boxes judges. Anything else is off the store's
-  // rhythm. Measured on one checkout: 0, 4 and 41px between blocks where the design had one 12/16px rhythm.
-  const rhythm = window.CL_JOINS_RHYTHM && Number(window.CL_JOINS_RHYTHM.stack) > 0 ? window.CL_JOINS_RHYTHM : null;
-  if (rhythm) {
-    const steps = [Number(rhythm.stack), Number(rhythm.section)].filter((n) => n > 0);
-    // Controls keep their component's own spacing (two buttons in a card), not the page's rhythm.
-    const control = (el) => /^(A|BUTTON|INPUT|SELECT|TEXTAREA|LABEL)$/.test(el.tagName) || el.getAttribute('role') === 'button';
-    const byEl = new Map(boxes.filter((b) => !control(b.el)).map((b) => [b.el, b]));
-    const parents = new Set(boxes.map((b) => b.el.parentElement).filter(Boolean));
-    for (const p of parents) {
-      const kids = Array.from(p.children).map((c) => byEl.get(c)).filter(Boolean).sort((x, y) => x.r.top - y.r.top);
-      for (let i = 1; i < kids.length; i++) {
-        const [a, b] = [kids[i - 1], kids[i]];
-        if (overlapX(a.r, b.r) < Math.min(a.r.width, b.r.width) * 0.5) continue;
-        if (!(a.bg || a.sides || b.bg || b.sides)) continue;
-        const gap = b.r.top - a.r.bottom;
-        if (gap <= 0.5 || steps.some((s) => Math.abs(gap - s) <= 2)) continue;
-        flag('off-rhythm', `${describe(a.el)} → ${describe(b.el)}`,
-          `${round(gap)}px between them at y=${round(a.r.bottom + window.scrollY)}px, off the store's rhythm (${steps.join(' / ')}px) — set the lower one's space above to a step`);
-      }
-    }
-  }
-
   // ── stack-mismatch ────────────────────────────────────────────────────────────────────────────
   // A collapsible is a <details> (its header: the <summary>), an element carrying is_open="yes|no" whose
   // first child is a header (this plugin's toggles), or a block whose first child toggles it through
@@ -643,7 +641,7 @@
       const diffs = PROPS_LOOK.filter((p) => p.key in norm && looks[i][p.key] !== undefined && !p.eq(looks[i][p.key], norm[p.key]))
         .map((p) => `${p.label} ${p.show(looks[i][p.key])} (the others: ${p.show(norm[p.key])})`);
       if (diffs.length) {
-        flag('stack-mismatch', describe(c.el), `one of ${stack.length} collapsibles stacked here looks different: ${diffs.join('; ')} — blocks of one kind in one stack share one look`);
+        flag('L4', describe(c.el), `one of ${stack.length} collapsibles stacked here looks different: ${diffs.join('; ')} — blocks of one kind in one stack share one look`, { rule: 'collapsible stack', design: designOf(c.el), at: c.el });
       }
     });
   }
@@ -835,8 +833,20 @@
       if (rects.length) texts.push({ node: n, el, rects });
     }
   }
+  // The scroll or clip container that cuts a box: the nearest ancestor whose overflow is not visible and whose box the
+  // rect reaches past by more than half a pixel. Measured on two stores: a quick view's body scrolls under its fixed
+  // footer, and text it had scrolled away was reported glued to the footer's line.
+  const clippedBy = (el, r) => {
+    for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+      const c = box(a);
+      if (r.top < c.top - 0.5 || r.bottom > c.bottom + 0.5 || r.left < c.left - 0.5 || r.right > c.right + 0.5) return a;
+    }
+    return null;
+  };
   const rtl = getComputedStyle(document.body).direction === 'rtl';
-  const startOf = (r) => (rtl ? W - r.right : r.left); // from the window's start edge: left, or right in RTL
+  const startOf = (r) => (rtl ? R0 - r.right : r.left - L0); // from the content box's start edge: left, or right in RTL
   const media = qa('img, svg, video, picture').filter((m) => !(m.parentElement && m.parentElement.closest('svg')) && !hidden(m));
   // Centred content keeps no edge: its own text centred, or its parent centring it.
   const centred = (el) => {
@@ -852,7 +862,7 @@
   // page adds its margin there). Centred content keeps no edge; a part with something beside it on its start side
   // (a product's title right of its photos) does not start a row and is not compared. Measured on one store at
   // 1440: header 72px, trail 48px, title 64px, and 0 findings from every other check there.
-  const edgeWant = Number(window.CL_JOINS_RHYTHM && window.CL_JOINS_RHYTHM.edge) > 0 ? Number(window.CL_JOINS_RHYTHM.edge) : null;
+  const edgeWant = EDGE;
   // The first part shown for each selector, in order; outside the header (a theme may put the site's name in an h1).
   const firstOf = (sels, outside) => {
     for (const sel of sels) { const el = qa(sel).find((x) => !hidden(x) && !(outside && outside.contains(x))); if (el) return el; }
@@ -868,14 +878,14 @@
       let found = null;
       for (let a = el; a && a !== document.body; a = a.parentElement) {
         const r = box(a);
-        if (r.left > 1 && r.right < W - 1 && drawsBox(a)) found = r;
+        if (r.left > L0 + 1 && r.right < R0 - 1 && drawsBox(a)) found = r;
       }
       panelMemo.set(el, found);
     }
     return panelMemo.get(el);
   };
   // A part's content nearest the start edge, and nearest the end edge (the end: right, or left in RTL).
-  const endOf = (r) => (rtl ? r.left : W - r.right);
+  const endOf = (r) => (rtl ? r.left - L0 : R0 - r.right);
   const edgesIn = (root) => {
     let start = null;
     let end = null;
@@ -944,15 +954,15 @@
       if (endAligned(p.end.el, p.el) || startOf(p.start.r) > W / 2) {
         const e = round(endOf(p.end.r));
         if (Math.abs(e - e0) <= 2) continue;
-        flag('edge-mismatch', describe(p.el), `${p.name} is aligned to the ${otherSide} and ends ${e}px from that edge, ${ref.name} ${e0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content ends where ${ref.name}'s does`);
+        flag('L5', describe(p.el), `${p.name} is aligned to the ${otherSide} and ends ${e}px from that edge, ${ref.name} ${e0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content ends where ${ref.name}'s does`, { rule: 'edge ruler', measured: e, expected: e0, design: designOf(p.el), at: p.el });
         continue;
       }
       const x = round(startOf(p.start.r));
       if (Math.abs(x - x0) <= 2) continue;
-      flag('edge-mismatch', describe(p.el), `${p.name} starts ${x}px from the ${side} edge, ${ref.name} ${x0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content starts where ${ref.name}'s does`);
+      flag('L5', describe(p.el), `${p.name} starts ${x}px from the ${side} edge, ${ref.name} ${x0}px — the parts stacked on every page share one edge: set ${p.name}'s side space so its content starts where ${ref.name}'s does`, { rule: 'edge ruler', measured: x, expected: x0, design: designOf(p.el), at: p.el });
     }
     if (edgeWant && (phone ? Math.abs(x0 - edgeWant) > 2 : x0 < edgeWant - 2)) {
-      flag('edge-mismatch', describe(ref.el), `${ref.name} starts ${x0}px from the ${side} edge, and the store's edge inset is ${edgeWant}px${phone ? '' : ' (at least that on a wider screen)'} — set its side space to the inset`);
+      flag('L5', describe(ref.el), `${ref.name} starts ${x0}px from the ${side} edge, and the store's page edge is ${edgeWant}px${phone ? '' : ' (at least that on a wider screen)'} — set its side space to the page edge`, { rule: 'edge ruler', measured: x0, expected: edgeWant, design: designOf(ref.el), at: ref.el });
     }
   }
 
@@ -961,15 +971,21 @@
   // bottom line, a heading on a section's rule. Measured between the text's own box (the font's height) and the
   // line. 8px is the smallest gap Material's card puts between two parts of it (its text block
   // has 16dp of padding); a box's own text near its own border is that box's padding, not this.
-  const GLUE = 8;
+  const GLUE = SMALL;
   const gluedTo = new Map();
   for (const l of lines.filter((x) => x.kind === 'divider')) {
     for (const t of texts) {
-      if (l.el.contains(t.el)) continue;
+      // Its own line: the box's padding, judged only under the tight step (text 2px under its own footer's line).
+      const own = l.el.contains(t.el);
       for (const r of t.rects) {
         if (Math.min(r.right, l.right) - Math.max(r.left, l.left) <= 0) continue;
-        const d = r.top >= l.y - 0.5 ? r.top - l.y : r.bottom <= l.y + 0.5 ? l.y - r.bottom : null;
-        if (d === null || d >= GLUE) continue;
+        // Text a scroll container clips (scrolled under a fixed footer) is not next to a line outside that container.
+        const clip = clippedBy(t.el, r);
+        if (clip && !clip.contains(l.el)) continue;
+        // From the line's own edge on the text's side: a 1px bottom border's top, a top border's bottom.
+        const [y0, y1] = l.side === 'top' ? [l.y, l.y + (l.w || 0)] : l.side === 'bottom' ? [l.y - (l.w || 0), l.y] : [l.y, l.y];
+        const d = r.top >= y0 - 0.5 ? r.top - y1 : r.bottom <= y1 + 0.5 ? y0 - r.bottom : null;
+        if (d === null || d >= (own ? TIGHT : GLUE) - 0.5) continue;
         const g = gluedTo.get(l.el) || { l, d: Infinity, el: null, n: 0 };
         g.n++;
         if (d < g.d) Object.assign(g, { d: Math.max(0, d), el: t.el, words: text(t.el).slice(0, 40) });
@@ -978,8 +994,10 @@
     }
   }
   for (const g of gluedTo.values()) {
-    flag('glued-to-line', `${describe(g.l.el)} (${g.l.side}) + ${describe(g.el)}`,
-      `"${g.words}" sits ${round(g.d)}px from the line ${describe(g.l.el)} draws${g.n > 1 ? ` (${g.n} line(s) of text under 8px)` : ''} — keep text at least 8px from a line another block draws: give the text's block space on that side`);
+    const own = g.l.el.contains(g.el);
+    flag('L1', `${describe(g.l.el)} (${g.l.side}) + ${describe(g.el)}`,
+      `text on a line: "${g.words}" sits ${round(g.d)}px from the line ${describe(g.l.el)} draws${g.n > 1 ? ` (${g.n} line(s) of text that near)` : ''} — ${own ? `keep text at least ${TIGHT}px from its own box's line: give the box padding on that side` : `keep text at least ${GLUE}px from a line another block draws: give the text's block space on that side`}`,
+      { rule: 'text on a line', measured: round(g.d), expected: `at least ${own ? TIGHT : GLUE}px`, design: designOf(g.el), at: [g.el, g.l.el] });
   }
 
   // ── side-gap ──────────────────────────────────────────────────────────────────────────────────
@@ -1007,10 +1025,543 @@
           }
         }
       }
-      if (gap < 8) { hit++; worst = Math.min(worst, Math.max(0, gap)); }
+      if (gap < SMALL - 0.5) { hit++; worst = Math.min(worst, Math.max(0, gap)); }
     }
     if (hit) {
-      flag('side-gap', describe(list), `${hit} of its ${cards.length} cards keep their text ${round(worst)}px from their photo — at least 8px between a card's photo and its text (Material's card: 16dp of padding around its text); pad the card's text block`);
+      flag('L2', describe(list), `text glued to the photo: ${hit} of its ${cards.length} cards keep their text ${round(worst)}px from their photo — at least ${SMALL}px between a card's photo and its text (Material's card: 16dp of padding around its text); pad the card's text block`, { rule: 'photo edge', measured: round(worst), expected: `at least ${SMALL}px`, design: designOf(list), at: list });
+    }
+  }
+
+  // ══ THE SPACING LAWS ═════════════════════════════════════════════════════════════════════════
+  // Each law is checked on every visible thing the run judges, in both directions; none names a component. The joins
+  // above are the laws' first clauses (L1: boxes and cards touching, doubled lines, text on a line; L2: text glued to a
+  // photo; L4: a collapsible stack; L5: the page's edge ruler). What follows measures BETWEEN INKS — what the eye sees:
+  // a text line's box, a photo, a painted box. A link's padding is no ink, so the space it adds is measured as space.
+  const csMemo = new Map();
+  const csOf = (el) => { if (!csMemo.has(el)) csMemo.set(el, getComputedStyle(el)); return csMemo.get(el); };
+  const lumC = (c) => { const f = (v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+  const ratioOf = (a, b) => { const [hi, lo] = [lumC(a), lumC(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+  const mix = (t, u) => ({ r: t.r * t.a + u.r * (1 - t.a), g: t.g * t.a + u.g * (1 - t.a), b: t.b * t.a + u.b * (1 - t.a), a: 1 });
+  // What shows behind an element: its ancestors' backgrounds, see-through ones over the first solid one (white).
+  const backOf = (el) => {
+    const layers = [];
+    for (let a = el.parentElement; a; a = a.parentElement) {
+      const c = parseColour(csOf(a).backgroundColor);
+      if (c && c.a > 0.01) { layers.push(c); if (c.a >= 0.99) break; }
+    }
+    let bg = layers.length && layers[layers.length - 1].a >= 0.99 ? layers.pop() : { r: 255, g: 255, b: 255, a: 1 };
+    while (layers.length) bg = mix(layers.pop(), bg);
+    return bg;
+  };
+  // L2's test, a box is a box only if it is seen: a border or outline, a shadow, or a background at least T : 1 against
+  // what is behind it. A background under T with neither is FAINT: no one sees a box there. Measured on one store: a
+  // "Where to buy" box rgb(21,21,23) on a page of rgb(11,11,12), 1.08 : 1, its content inset 18 and 30px.
+  const paintMemo = new Map();
+  const paintOf = (el) => {
+    if (paintMemo.has(el)) return paintMemo.get(el);
+    const cs = csOf(el);
+    const sides = ['Top', 'Right', 'Bottom', 'Left'].filter((s) => edge(cs, s));
+    const shadow = !!shadowEdge(cs);
+    const c = parseColour(cs.backgroundColor);
+    let bg = cs.backgroundImage !== 'none';
+    let faint = 0;
+    if (!bg && c && c.a > 0.05) {
+      const back = backOf(el);
+      const k = ratioOf(mix(c, back), back);
+      if (k >= T) bg = true; else if (k > 1.004) faint = k;
+    }
+    const v = { sides, shadow, bg, faint, container: bg || shadow || sides.length === 4 };
+    paintMemo.set(el, v);
+    return v;
+  };
+  // A text line's box: the glyphs plus the half-leading above and below — what CSS spaces. Two paragraphs 16px apart
+  // measure 16 between their line boxes; their glyphs would measure 16 plus each font's leading.
+  // The line is placed on its block's own grid — the content top plus whole line heights — since a glyph box is
+  // rounded and drifts by up to a pixel (32px of space read as 33). Where the grid does not hold the glyphs (mixed
+  // sizes, a 'normal' line height), the glyphs plus the half-leading.
+  const lineBoxOf = (el, r) => {
+    let blk = el;
+    while (blk.parentElement && /^inline/.test(csOf(blk).display) && !/^inline-(block|flex|grid|table)$/.test(csOf(blk).display)) blk = blk.parentElement;
+    const bcs = csOf(blk);
+    const lh = parseFloat(bcs.lineHeight);
+    if (!Number.isNaN(lh) && lh > 0) {
+      const b = box(blk);
+      const top0 = b.top + parseFloat(bcs.borderTopWidth) + parseFloat(bcs.paddingTop);
+      const mid = (r.top + r.bottom) / 2;
+      const i = Math.floor((mid - top0) / lh);
+      const top = top0 + i * lh;
+      if (i >= 0 && r.top >= top - 1 && r.bottom <= top + lh + 1) return { left: r.left, right: r.right, top, bottom: top + lh, width: r.width, height: lh };
+    }
+    let own = parseFloat(csOf(el).lineHeight);
+    if (Number.isNaN(own)) own = parseFloat(csOf(el).fontSize) * 1.2;
+    const extra = Math.max(0, (own - r.height) / 2);
+    return { left: r.left, right: r.right, top: r.top - extra, bottom: r.bottom + extra, width: r.width, height: r.height + 2 * extra };
+  };
+  const cut = (r, c) => ({ left: Math.max(r.left, c.left), right: Math.min(r.right, c.right), top: Math.max(r.top, c.top), bottom: Math.min(r.bottom, c.bottom) });
+  const empty = (r) => r.right - r.left < 1 || r.bottom - r.top < 1;
+  const outOfFlow = (el) => /^(absolute|fixed)$/.test(csOf(el).position);
+  const clips = (el) => csOf(el).overflowX !== 'visible' || csOf(el).overflowY !== 'visible';
+  // The inks. Text by line; photos, icons and videos; painted boxes (seen as boxes, by L2). Never inks: anything
+  // invisible (opacity 0, hidden, an empty live region), a box under T with no border, what a scroll container hides.
+  const inks = [];
+  const visibleIn = (el, r) => { for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { if (clips(a)) { r = cut(r, box(a)); if (empty(r)) return null; } } return r; };
+  for (const t of texts) for (const g of t.rects) { if (visibleIn(t.el, g)) inks.push({ el: t.el, kind: 'text', r: lineBoxOf(t.el, g), glyph: g }); }
+  for (const m of media) { const r = box(m); if (r.width >= 4 && r.height >= 4 && visibleIn(m, r)) inks.push({ el: m, kind: 'media', r }); }
+  // A form control the browser draws itself (a radio, a checkbox, a range) is seen with no CSS of its own.
+  for (const c of qa('input, select, textarea, progress, meter')) {
+    if (hidden(c) || c.type === 'hidden' || csOf(c).appearance === 'none' || parseFloat(csOf(c).opacity) < 0.05) continue;
+    const r = box(c);
+    if (r.width >= 4 && r.height >= 4 && visibleIn(c, r)) inks.push({ el: c, kind: 'media', r });
+  }
+  const boxInks = [];
+  for (const el of qa('body *')) {
+    if (SKIP.has(el.tagName.toUpperCase()) || hidden(el)) continue;
+    const p = paintOf(el);
+    // A line one side of a box draws (a header's bottom rule, a divider) is an ink of its own: the space either side
+    // of it is measured to the line, not across it.
+    if (!p.container && p.sides.length) {
+      const r = box(el);
+      const cs = csOf(el);
+      for (const s of p.sides) {
+        const w = parseFloat(cs[`border${s}Width`]);
+        const lr = s === 'Top' ? { left: r.left, right: r.right, top: r.top, bottom: r.top + w } : s === 'Bottom' ? { left: r.left, right: r.right, top: r.bottom - w, bottom: r.bottom }
+          : s === 'Left' ? { left: r.left, right: r.left + w, top: r.top, bottom: r.bottom } : { left: r.right - w, right: r.right, top: r.top, bottom: r.bottom };
+        if (r.width >= 4 && r.height >= 1 && visibleIn(el, lr)) inks.push({ el, kind: 'line', r: { ...lr, width: lr.right - lr.left, height: lr.bottom - lr.top } });
+      }
+      continue;
+    }
+    if (!p.container) continue;
+    // Where the paint is: a background clipped to the content or padding box (a swatch's dot inside its 44px tap
+    // padding) is drawn there, not at the border box — unless a border or a shadow draws the outer edge.
+    let r = box(el);
+    const cs = csOf(el);
+    if (!p.sides.length && !p.shadow && /content-box|padding-box/.test(cs.backgroundClip)) {
+      const content = cs.backgroundClip === 'content-box';
+      const inset = (s) => parseFloat(cs[`border${s}Width`]) + (content ? parseFloat(cs[`padding${s}`]) : 0);
+      r = { left: r.left + inset('Left'), right: r.right - inset('Right'), top: r.top + inset('Top'), bottom: r.bottom - inset('Bottom') };
+      r = { ...r, width: r.right - r.left, height: r.bottom - r.top };
+    }
+    if (r.width < 4 || r.height < 4 || !visibleIn(el, r)) continue;
+    const k = { el, kind: 'box', r };
+    inks.push(k);
+    boxInks.push(k);
+  }
+  // Each element's ink extent: the union of the inks inside it that flow with it (an absolutely placed overlay and what
+  // a clipping box hides are left out of its ancestors').
+  const ext = new Map();
+  for (const k of inks) {
+    let r = { left: k.r.left, right: k.r.right, top: k.r.top, bottom: k.r.bottom };
+    for (let a = k.el; a && a !== document.documentElement; a = a.parentElement) {
+      const e = ext.get(a);
+      if (!e) ext.set(a, { ...r }); else { e.left = Math.min(e.left, r.left); e.right = Math.max(e.right, r.right); e.top = Math.min(e.top, r.top); e.bottom = Math.max(e.bottom, r.bottom); }
+      if (outOfFlow(a)) break;
+      if (a !== k.el && clips(a)) { r = cut(r, box(a)); if (empty(r)) break; }
+    }
+  }
+  const sig = (el) => `${el.tagName}.${typeof el.className === 'string' ? el.className.trim().split(/\s+/).filter((c) => !/\d/.test(c)).sort().join('.') : ''}`;
+  const isControl = (el) => /^(A|BUTTON|INPUT|SELECT|TEXTAREA|LABEL|SUMMARY)$/.test(el.tagName) || /^(button|link|tab|switch|checkbox|radio|option|menuitem)$/.test(el.getAttribute('role') || '');
+  const insideControl = (el) => !!el.closest('a, button, label, summary, [role="button"]');
+  const faced = (el, side) => boxInks.find((k) => (k.el === el || el.contains(k.el)) && Math.abs(k.r[side] - ext.get(el)[side]) <= 0.5);
+  const wordsOf = (el) => text(el).slice(0, 40);
+  const spacingFlag = (law, where, detail, extra) => flag(law, where, detail, extra);
+
+  // ── the flow pairs: each block's children, as the eye meets them ──────────────────────────────
+  // For every box holding two or more visible children in flow: each child's neighbour above (one under the other)
+  // and before it (side by side). A side-by-side gap is measured only where both inks reach their boxes' facing edges
+  // (cards, photos, painted boxes): text in a column leaves its track's unused space, which is alignment, not a gap.
+  const pairs = []; // { p, a, b, axis: 'y' | 'x', gap }
+  const parents = new Set();
+  for (const el of ext.keys()) if (el.parentElement && el.parentElement !== document.documentElement) parents.add(el.parentElement);
+  for (const p of parents) {
+    if (!inScope(p) || /^(TABLE|TBODY|THEAD|TFOOT|TR|SVG|svg|SELECT|PICTURE)$/.test(p.tagName)) continue;
+    const pcs = csOf(p);
+    if (pcs.display.startsWith('inline') && !/flex|grid/.test(pcs.display)) continue;
+    const kids = Array.from(p.children).filter((c) => ext.has(c) && !outOfFlow(c) && !hidden(c)
+      && (!/^inline$/.test(csOf(c).display) || /flex|grid/.test(pcs.display)));
+    if (kids.length < 2) continue;
+    const spread = /space-(between|around|evenly)/.test(pcs.justifyContent);
+    for (let i = 1; i < kids.length; i++) {
+      const b = kids[i];
+      const eb = ext.get(b);
+      let above = null;
+      let before = null;
+      // The neighbour above is the row right above it — the lowest earlier sibling ending over it, wherever it sits
+      // across (a trail aligned to the end still stands between the header and the content).
+      for (let j = i - 1; j >= 0; j--) {
+        const ea = ext.get(kids[j]);
+        if (eb.top >= ea.bottom - 1 && (!above || ea.bottom > ext.get(above).bottom)) above = kids[j];
+        if (!before && overlapY(eb, ea) > Math.min(eb.bottom - eb.top, ea.bottom - ea.top) * 0.5
+          && (rtl ? eb.right <= ea.left + 1 : eb.left >= ea.right - 1)) before = kids[j];
+      }
+      // A flex column that spreads its children, or a child that grows into the free space (a card stretched to its
+      // row's height, a button pushed to the bottom), makes the space next to it free space, not a gap.
+      const column = /flex/.test(pcs.display) && /column/.test(pcs.flexDirection);
+      const grows = (el) => parseFloat(csOf(el).flexGrow) > 0;
+      const free = column && (/space-|end|center/.test(pcs.justifyContent) || (above && (grows(above) || grows(b))));
+      if (above && !free) pairs.push({ p, a: above, b, axis: 'y', gap: eb.top - ext.get(above).bottom });
+      if (before && !spread) {
+        const ea = ext.get(before);
+        const [ba, bb] = [box(before), box(b)];
+        const hug = rtl ? Math.abs(ea.left - ba.left) <= 1 && Math.abs(eb.right - bb.right) <= 1 : Math.abs(ea.right - ba.right) <= 1 && Math.abs(eb.left - bb.left) <= 1;
+        if (hug) pairs.push({ p, a: before, b, axis: 'x', gap: rtl ? ea.left - eb.right : eb.left - ea.right });
+      }
+    }
+  }
+
+  // ── L1 never touch — side by side ─────────────────────────────────────────────────────────────
+  // Two boxes side by side with under the tight step between them, where each side facing the other is a painted box.
+  // Allowed joins: the parts of one box (their common parent draws it); a row of controls drawn as one (a segmented
+  // control, a stepper, a field and its button); table cells. Measured on one store: a reviews summary ending at 368px
+  // and the first review card starting at 368 — the old checks looked only at boxes one ON the other.
+  for (const pr of pairs) {
+    if (pr.axis !== 'x' || pr.gap >= TIGHT - 0.5) continue;
+    const [fa, fb] = [faced(pr.a, rtl ? 'left' : 'right'), faced(pr.b, rtl ? 'right' : 'left')];
+    if (!fa || !fb) continue;
+    if (paintOf(pr.p).container || partsOfOneBox(pr.a, pr.b)) continue;
+    if ([fa, fb].every((k) => controlBox(k.el, k.r) || isControl(k.el))) continue;
+    // A photo full-bleed beside the text of its own card (a split card) is drawn as one.
+    if ([fa, fb].some((k) => /^(IMG|VIDEO|PICTURE|CANVAS)$/.test(k.el.tagName) || csOf(k.el).backgroundImage !== 'none')) continue;
+    spacingFlag('L1', `${describe(fa.el)} | ${describe(fb.el)}`, `boxes touch side by side: ${round(Math.max(0, pr.gap))}px between ${describe(fa.el)} and ${describe(fb.el)} — set the space between them to a step (${STEPS.filter((v) => v > 0).join(' / ')}px)`,
+      { rule: 'touching', measured: round(Math.max(0, pr.gap)), expected: `at least ${TIGHT}px`, design: designOf(pr.b), at: [fa.el, fb.el] });
+  }
+
+  // ── L6 scale only ─────────────────────────────────────────────────────────────────────────────
+  // Every gap between two neighbours is one of the store's steps at this width (±1px) — or 4px (the tight role) inside
+  // one part, and 2 / 6px inside a control. 0 is a join, judged by L1. Gaps past twice the largest step are a layout's
+  // free space (a tall hero), not a spacing value. One finding per box, naming each gap and the nearest step.
+  const maxStep = Math.max(...STEPS, 64);
+  const offStep = new Map();
+  for (const pr of pairs) {
+    const g = pr.gap;
+    if (g <= 0.5 || g > maxStep * 2) continue;
+    const small = (el) => (isControl(el) || controlBox(el, box(el))) && box(el).height <= 24;
+    const extra = insideControl(pr.p) || (small(pr.a) && small(pr.b)) ? INNER : [TIGHT];
+    if (onStep(g, extra)) continue;
+    const o = offStep.get(pr.p) || [];
+    o.push(pr);
+    offStep.set(pr.p, o);
+  }
+  for (const [p, list] of offStep) {
+    const vals = [...new Set(list.map((x) => round(x.gap)))];
+    const first = list[0];
+    spacingFlag('L6', describe(p), `${vals.join(', ')}px between its parts (${describe(first.a)} → ${describe(first.b)}${list.length > 1 ? ` and ${list.length - 1} more` : ''}) — not a step of the store at this width (${STEPS.join(' / ')}px); nearest: ${vals.map((v) => stepName(nearest(v))).join(', ')}`,
+      { rule: 'off the scale', measured: vals, expected: vals.map((v) => nearest(v)), design: designOf(first.b), at: list.flatMap((x) => [x.a, x.b]) });
+  }
+
+  // ── L4 same job, same spacing (repeated siblings) and L3 (c) ──────────────────────────────────
+  // Siblings of one structure keep one gap between them (±1px), along each axis. And L3 (c), internal ≤ external: a
+  // list of boxes keeps its boxes' inset no larger than the space between them.
+  const byParentSig = new Map();
+  for (const pr of pairs) {
+    if (sig(pr.a) !== sig(pr.b)) continue;
+    const k = `${sig(pr.a)}|${pr.axis}`;
+    const m = byParentSig.get(pr.p) || new Map();
+    m.set(k, (m.get(k) || []).concat(pr));
+    byParentSig.set(pr.p, m);
+  }
+  const insetOf = (el) => {
+    const r = box(el);
+    const cs = csOf(el);
+    const inner = { left: r.left + parseFloat(cs.borderLeftWidth), right: r.right - parseFloat(cs.borderRightWidth), top: r.top + parseFloat(cs.borderTopWidth) };
+    const all = inks.filter((k) => k.el !== el && el.contains(k.el) && k.kind !== 'line');
+    const own = all.filter((k) => k.kind === 'text' && !all.some((o) => o !== k && overlapY(o.r, k.r) > 0 && startOf(o.r) < startOf(k.r) - 1));
+    if (!own.length) return null;
+    return Math.min(...own.map((k) => (rtl ? inner.right - k.r.right : k.r.left - inner.left)));
+  };
+  for (const [p, m] of byParentSig) {
+    for (const [k, list] of m) {
+      const gaps = list.map((x) => x.gap).filter((g) => g > -0.5);
+      if (gaps.length >= 2 && Math.max(...gaps) - Math.min(...gaps) > 1) {
+        spacingFlag('L4', describe(p), `its ${list.length + 1} ${k.endsWith('|y') ? 'stacked' : 'side-by-side'} ${describe(list[0].b)} are ${[...new Set(gaps.map(round))].join(' / ')}px apart — parts of one kind keep one gap: set it once, on their box`,
+          { rule: 'one gap', measured: [...new Set(gaps.map(round))], design: designOf(p), at: list.flatMap((x) => [x.a, x.b]) });
+      }
+      const boxes2 = [list[0].a, ...list.map((x) => x.b)].filter((el) => paintOf(el).container && !isControl(el));
+      if (boxes2.length >= 2 && gaps.length) {
+        const ins = boxes2.map(insetOf).filter((v) => v !== null);
+        const g = Math.min(...gaps);
+        const i = ins.length ? Math.min(...ins) : null;
+        if (i !== null && g > 0.5 && i > g + 1) {
+          spacingFlag('L3', describe(p), `its boxes keep their content ${round(i)}px in but stand only ${round(g)}px apart — inside a box no more space than between boxes (internal ≤ external): less inset, or more space between them`,
+            { rule: 'internal ≤ external', measured: { inset: round(i), gap: round(g) }, design: designOf(p), at: boxes2 });
+        }
+      }
+    }
+  }
+
+  // ── L3 proximity — a heading and its group ────────────────────────────────────────────────────
+  // A group's items are no further apart than its heading is from the first of them, and a heading is nearer what it
+  // labels than what came before it. A heading: h1–h6, a role="heading", a legend, a dt — or a short text block styled
+  // apart (bolder, larger, capitals) right before a list. Measured on one store: footer links 38px apart under a heading
+  // 28px away, after a phone tap-target fix set their padding on every screen.
+  const groups = [];
+  const textOnly = (el) => el.children.length === 0 || Array.from(el.querySelectorAll('*')).every((c) => /^(SPAN|STRONG|B|EM|I|SMALL|BR)$/.test(c.tagName));
+  const styledApart = (h, item) => {
+    const [a, b] = [csOf(h), csOf(item)];
+    return parseInt(a.fontWeight, 10) >= 600 && parseInt(a.fontWeight, 10) > parseInt(b.fontWeight, 10)
+      || parseFloat(a.fontSize) > parseFloat(b.fontSize) + 1 || (a.textTransform === 'uppercase' && b.textTransform !== 'uppercase');
+  };
+  for (const h of qa('body *')) {
+    if (!ext.has(h) || hidden(h) || !h.parentElement) continue;
+    const semantic = /^H[1-6]$/.test(h.tagName) || h.getAttribute('role') === 'heading' || /^(LEGEND|DT)$/.test(h.tagName);
+    if (!semantic && !textOnly(h)) continue;
+    let next = h.nextElementSibling;
+    while (next && (!ext.has(next) || hidden(next))) next = next.nextElementSibling;
+    if (!next) continue;
+    let items = Array.from(next.children).filter((c) => ext.has(c) && !hidden(c));
+    if (!(items.length >= 2 && items.every((c) => sig(c) === sig(items[0])))) {
+      items = [];
+      for (let s = next; s && ext.has(s) && sig(s) === sig(next); s = s.nextElementSibling) items.push(s);
+    }
+    if (items.length < 2) continue;
+    if (!semantic && !styledApart(h, items[0])) continue;
+    const eh = ext.get(h);
+    const stacked = items.every((c, i) => i === 0 || ext.get(c).top >= ext.get(items[i - 1]).bottom - 1);
+    if (!stacked || ext.get(items[0]).top < eh.bottom - 1) continue;
+    const hg = ext.get(items[0]).top - eh.bottom;
+    const ig = Math.max(...items.slice(1).map((c, i) => ext.get(c).top - ext.get(items[i]).bottom));
+    const g = { h, items, hg, ig, parent: h.parentElement };
+    groups.push(g);
+    if (ig > hg + 1) {
+      spacingFlag('L3', describe(h.parentElement), `"${wordsOf(h)}" heads items ${round(ig)}px apart, yet sits only ${round(hg)}px from the first — a group's items no further apart than its heading is from them: ${round(ig) > 24 ? 'less space between the items' : 'more space under the heading'}`,
+        { rule: 'heading and its items', measured: { items: round(ig), heading: round(hg) }, design: designOf(h), at: [h, ...items] });
+    }
+    let prev = h.previousElementSibling;
+    while (prev && (!ext.has(prev) || hidden(prev))) prev = prev.previousElementSibling;
+    if (prev && ext.get(prev).bottom <= eh.top + 1 && overlapX(ext.get(prev), eh) > 0) {
+      const pg = eh.top - ext.get(prev).bottom;
+      if (pg < hg - 1) {
+        spacingFlag('L3', describe(h), `"${wordsOf(h)}" sits ${round(pg)}px under what is above it and ${round(hg)}px over what it labels — a heading is nearer what it labels: more space above it`,
+          { rule: 'heading nearer its group', measured: { above: round(pg), below: round(hg) }, design: designOf(h), at: [h, prev] });
+      }
+    }
+  }
+  // L4, parallel groups: columns side by side, each a heading and its items, keep one gap between items.
+  const rowsOfGroups = new Map();
+  for (const g of groups) {
+    const col = g.parent;
+    const row = col.parentElement;
+    if (!row) continue;
+    rowsOfGroups.set(row, (rowsOfGroups.get(row) || []).concat(g));
+  }
+  for (const [row, gs] of rowsOfGroups) {
+    const side = gs.filter((g) => gs.some((o) => o !== g && Math.abs(ext.get(o.parent).top - ext.get(g.parent).top) <= 2 && overlapX(ext.get(o.parent), ext.get(g.parent)) <= 0));
+    if (side.length < 2) continue;
+    const gaps = side.map((g) => g.ig);
+    if (Math.max(...gaps) - Math.min(...gaps) > 1) {
+      spacingFlag('L4', describe(row), `columns side by side space their items ${side.map((g) => `${round(g.ig)}px ("${wordsOf(g.h)}")`).join(', ')} — parallel groups keep one gap between their items`,
+        { rule: 'parallel groups', measured: side.map((g) => round(g.ig)), design: designOf(row), at: side.map((g) => g.parent) });
+    }
+  }
+
+  // ── L2 a box is a box only if it is seen ──────────────────────────────────────────────────────
+  // (a) A FAINT box (a background under T, no border, no shadow) is no container: its content sits on the ruler of what
+  // stands beside it, and any inset it keeps is a misalignment. (b) A seen box keeps all its content on one inner edge,
+  // at least the tight step from its painted sides. (c) A control is wider inside than tall (M3's "squish").
+  // A block that centres its own content (a flex row packed in the middle, centred text), or whose content sits in the
+  // middle of it with equal space each side (a capped width with auto margins), keeps no start edge.
+  const centresOwn = (c) => {
+    const cs = csOf(c);
+    if (cs.textAlign === 'center' || (/flex|grid/.test(cs.display) && !/column/.test(cs.flexDirection) && /center|space-around|space-evenly/.test(cs.justifyContent))) return true;
+    const e = ext.get(c);
+    const b = box(c);
+    return !!e && e.right - e.left < (b.right - b.left) * 0.9 && Math.abs((e.left - b.left) - (b.right - e.right)) <= 2;
+  };
+  for (const el of qa('body *')) {
+    if (!ext.has(el) || hidden(el)) continue;
+    const p = paintOf(el);
+    const r = box(el);
+    if (p.faint && !p.sides.length && !p.shadow && r.width >= 60 && r.height >= 24 && r.width < W - 2) {
+      const inset = startOf(ext.get(el)) - startOf(r);
+      const sibs = Array.from(el.parentElement ? el.parentElement.children : []).filter((s) => s !== el && ext.has(s) && !hidden(s) && !paintOf(s).faint);
+      const ruler = sibs.length ? Math.min(...sibs.map((s) => startOf(ext.get(s)))) : null;
+      const onRuler = ruler === null || Math.abs(startOf(r) - ruler) <= 2;
+      if (inset > 2 && onRuler) {
+        const back = backOf(el);
+        spacingFlag('L2', describe(el), `a box no one sees — its background is ${(Math.floor(p.faint * 100) / 100).toFixed(2)} : 1 against what is behind it (${hex(back)}), under ${T} : 1, with no border or shadow — yet its content starts ${round(inset)}px in, off the edge the parts beside it start on: draw the box (a border, or a background of at least ${T} : 1), or put its content on that edge`,
+          { rule: 'faint box', measured: { contrast: Math.round(p.faint * 100) / 100, inset: round(inset) }, expected: `${T} : 1, or no inset`, design: designOf(el), at: el });
+      }
+      continue;
+    }
+    if (!p.container || r.width < 80 || r.height < 40 || r.left <= L0 + 1 && r.right >= R0 - 1) continue;
+    if (controlBox(el, r) || isControl(el)) continue;
+    const cs = csOf(el);
+    const inner = { left: r.left + parseFloat(cs.borderLeftWidth), right: r.right - parseFloat(cs.borderRightWidth), top: r.top + parseFloat(cs.borderTopWidth) };
+    // Its rows: the children (through single wrappers), each where its own content starts — a seen box inside it at
+    // its painted edge; children side by side count once, by the first of the row; a photo spanning the box is media
+    // run to its edge. Measured on one store: a bordered group of three columns read as three inner edges.
+    let holder = el;
+    for (let i = 0; i < 6; i++) { const only = Array.from(holder.children).filter((c) => ext.has(c) && !outOfFlow(c) && !hidden(c)); if (only.length !== 1) break; holder = only[0]; }
+    const kids = Array.from(holder.children).filter((c) => ext.has(c) && !outOfFlow(c) && !hidden(c) && c.tagName !== 'LI' && !centred(c) && !centresOwn(c) && !endAligned(c, c));
+    const rowsIn = kids.filter((c) => !kids.some((o) => o !== c && overlapY(ext.get(o), ext.get(c)) > 0 && startOf(ext.get(o)) < startOf(ext.get(c)) - 1));
+    const kidStart = (c) => { if (paintOf(c).container) return startOf(box(c)); const own = inks.filter((k) => c.contains(k.el) && k.kind !== 'line' && !(k.el === c && k.kind === 'box')); return own.length ? Math.min(...own.map((k) => startOf(k.r))) : null; };
+    const bleeds = (c) => inks.some((k) => k.kind === 'media' && c.contains(k.el) && k.r.width >= inner.right - inner.left - 2);
+    const at = rowsIn.filter((c) => !bleeds(c)).map((c) => ({ c, d: kidStart(c) })).filter((x) => x.d !== null).map((x) => ({ ...x, d: x.d - startOf(inner) }));
+    if (at.length < 2) continue;
+    const ds = at.map((x) => x.d);
+    if (Math.max(...ds) - Math.min(...ds) > 2) {
+      const vals = [...new Set(ds.map(round))].sort((a, b) => a - b);
+      spacingFlag('L2', describe(el), `its content starts at ${vals.join(', ')}px from its ${rtl ? 'right' : 'left'} side — everything a box holds starts on one inner edge`,
+        { rule: 'one inner edge', measured: vals, design: designOf(el), at: el });
+    } else if (Math.min(...ds) < TIGHT - 0.5) {
+      spacingFlag('L2', describe(el), `its text starts ${round(Math.max(0, Math.min(...ds)))}px from its painted side — keep a box's content at least ${TIGHT}px in`,
+        { rule: 'inset', measured: round(Math.max(0, Math.min(...ds))), expected: `at least ${TIGHT}px`, design: designOf(el), at: el });
+    }
+  }
+  for (const k of boxInks) {
+    const el = k.el;
+    if (!(controlBox(el, k.r) || isControl(el)) || /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) continue;
+    const t = inks.filter((x) => x.kind === 'text' && el.contains(x.el));
+    if (t.length !== 1) continue;
+    const g = t[0].r;
+    const v = Math.min(g.top - k.r.top, k.r.bottom - g.bottom);
+    const h = Math.min(g.left - k.r.left, k.r.right - g.right);
+    if (v >= 2 && h < v - 1) {
+      spacingFlag('L2', describe(el), `"${wordsOf(el)}" keeps ${round(h)}px beside its text and ${round(v)}px above and below — a control is wider inside than tall (the plugin's control steps: 12 × 16, badge 4 × 8)`,
+        { rule: 'control inset', measured: { vertical: round(v), horizontal: round(h) }, design: designOf(el), at: el });
+    }
+  }
+
+  // ── L5 rulers — one column, one edge ──────────────────────────────────────────────────────────
+  // The blocks stacked in one column start on one edge (±2px): a block whose content starts elsewhere is off the
+  // column's ruler. Not compared: a seen box (its painted edge starts on the ruler, its content one inset in), a faint
+  // box (L2 says it), centred or end-aligned blocks, list items (their markers keep a secondary ruler).
+  for (const p of parents) {
+    if (!inScope(p)) continue;
+    const pcs = csOf(p);
+    if (/flex/.test(pcs.display) && !/column/.test(pcs.flexDirection)) continue;
+    if (/grid/.test(pcs.display) && pcs.gridTemplateColumns.split(' ').length > 1) continue;
+    if (paintOf(p).container) continue;
+    const kids = Array.from(p.children).filter((c) => ext.has(c) && !outOfFlow(c) && !hidden(c) && c.tagName !== 'LI' && !centred(c) && !centresOwn(c) && !endAligned(c, c) && !paintOf(c).faint);
+    if (kids.length < 2) continue;
+    // A seen box starts at its painted edge; a band across the page (a footer, a coloured section) at its content,
+    // which stands on the page's edge ruler.
+    const band = (c) => { const r = box(c); return r.left <= L0 + 1 && r.right >= R0 - 1; };
+    const contentOf = (c) => { const own = inks.filter((k) => c.contains(k.el) && k.kind !== 'line' && !(k.el === c && k.kind === 'box')); return own.length ? { left: Math.min(...own.map((k) => k.r.left)), right: Math.max(...own.map((k) => k.r.right)) } : null; };
+    const startAt = (c) => { if (!paintOf(c).container) { const r = contentOf(c); return r ? startOf(r) : null; } if (!band(c)) return startOf(box(c)); const r = contentOf(c); return r ? startOf(r) : null; };
+    const xs = kids.map(startAt);
+    if (xs.filter((x) => x !== null).length < 2) continue;
+    const counts = new Map();
+    for (const x of xs) { if (x === null) continue; const key = round(x); counts.set(key, (counts.get(key) || 0) + 1); }
+    const mode = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+    if (counts.get(mode) < 2) continue;
+    // "Or one inset inside a seen box": the content edge of a box standing on the ruler in this column.
+    const insideEdges = kids.filter((c, i) => paintOf(c).container && xs[i] !== null && Math.abs(xs[i] - mode) <= 2)
+      .map((c) => { const r = contentOf(c); return r ? startOf(r) : null; }).filter((x) => x !== null);
+    kids.forEach((c, i) => {
+      if (xs[i] === null || Math.abs(xs[i] - mode) <= 2 || (!paintOf(c).container && insideEdges.some((x) => Math.abs(xs[i] - x) <= 2))) return;
+      spacingFlag('L5', describe(c), `${c.firstElementChild || ext.has(c) ? `"${wordsOf(c)}"` : describe(c)} starts ${round(Math.abs(xs[i] - mode))}px ${xs[i] > mode ? 'further in than' : 'outside'} the edge the rest of its column starts on — one column, one ruler`,
+        { rule: 'column ruler', measured: round(xs[i]), expected: mode, design: designOf(c), at: c });
+    });
+  }
+
+  // ── L7 build rule — the reading line ──────────────────────────────────────────────────────────
+  // Body text keeps a readable line: at most `CL_SPACING.line_length` characters a line (80, WCAG 1.4.8; Material asks
+  // 40–60). One finding for the page, naming the longest.
+  const LINE = Number(SP && SP.line_length) > 0 ? Number(SP.line_length) : 80;
+  let longest = null;
+  for (const t of texts) {
+    if (t.rects.length < 3 || parseFloat(csOf(t.el).fontSize) > 20) continue;
+    const per = t.node.nodeValue.replace(/\s+/g, ' ').trim().length / (t.rects.length - 0.5);
+    if (per > LINE && (!longest || per > longest.per)) longest = { t, per };
+  }
+  if (longest) {
+    spacingFlag('L7', describe(longest.t.el), `"${wordsOf(longest.t.el)}…" runs about ${round(longest.per)} characters a line, past ${LINE} — narrow the reading column`,
+      { rule: 'line length', measured: round(longest.per), expected: `at most ${LINE}`, design: designOf(longest.t.el), at: longest.t.el });
+  }
+
+  // ── L8 overlays ───────────────────────────────────────────────────────────────────────────────
+  // What is drawn over a photo or a box — a badge, a label, a control — keeps one distance from the edges it is
+  // anchored to, the same for every overlay of that kind, and never touches another overlay. Measured on one store: a
+  // "Sold out" badge 8px from the photo's corner on two cards and 0 on a third.
+  const hosts = inks.filter((k) => k.kind === 'media' || k.kind === 'box');
+  const overlays = [];
+  for (const el of qa('body *')) {
+    if (!ext.has(el) || hidden(el) || csOf(el).position !== 'absolute') continue;
+    const o = ext.get(el);
+    const area = (o.right - o.left) * (o.bottom - o.top);
+    if (area < 16) continue;
+    // Its host is drawn under it, inside the box it is placed in (its nearest positioned ancestor) — or that box itself.
+    // A layer covering that whole box (a cover photo, a tint) is a background, not an overlay.
+    let cbEl = el.parentElement;
+    while (cbEl && cbEl !== document.body && csOf(cbEl).position === 'static') cbEl = cbEl.parentElement;
+    if (!cbEl || cbEl === document.body) continue;
+    const cbR = box(cbEl);
+    if (area >= cbR.width * cbR.height * 0.9) continue;
+    let host = null;
+    for (const h of hosts) {
+      if (h.el === el || el.contains(h.el) || (h.el !== cbEl && (!cbEl.contains(h.el) || h.el.contains(el)))) continue;
+      const c = cut(o, h.r);
+      if (empty(c) || (c.right - c.left) * (c.bottom - c.top) < area * 0.9) continue;
+      const ha = h.r.width * h.r.height;
+      if (area > ha * 0.25) continue;
+      if (!host || ha < host.r.width * host.r.height) host = h;
+    }
+    if (!host) continue;
+    const hr = host.r;
+    const dx = Math.min(o.left - hr.left, hr.right - o.right);
+    const dy = Math.min(o.top - hr.top, hr.bottom - o.bottom);
+    const corner = `${o.top - hr.top <= hr.bottom - o.bottom ? 'top' : 'bottom'}-${(o.left - hr.left <= hr.right - o.right) !== rtl ? 'start' : 'end'}`;
+    if (overlays.some((x) => x.el.contains(el))) continue;
+    overlays.push({ el, host, dx, dy, corner, kind: `${kindOf(el)}|${corner}` });
+  }
+  const byOverlay = new Map();
+  for (const ov of overlays) byOverlay.set(ov.kind, (byOverlay.get(ov.kind) || []).concat(ov));
+  for (const list of byOverlay.values()) {
+    if (list.length < 2) continue;
+    const xs = list.map((x) => x.dx); const ys = list.map((x) => x.dy);
+    if (Math.max(...xs) - Math.min(...xs) > 1 || Math.max(...ys) - Math.min(...ys) > 1) {
+      const vals = [...new Set(list.map((x) => `${round(x.dx)} × ${round(x.dy)}`))];
+      spacingFlag('L8', describe(list[0].el), `${list.length} overlays of one kind (${list[0].corner.replace('-', ' ')} of ${describe(list[0].host.el)}) sit ${vals.join(', ')}px from their host's edges — every overlay of a kind keeps one distance from the edges it is anchored to`,
+        { rule: 'one placement', measured: vals, design: designOf(list[0].el), at: list.map((x) => x.el) });
+    }
+  }
+  for (let i = 0; i < overlays.length; i++) {
+    for (let j = i + 1; j < overlays.length; j++) {
+      const [a, b] = [overlays[i], overlays[j]];
+      if (a.host !== b.host) continue;
+      const [ra, rb] = [ext.get(a.el), ext.get(b.el)];
+      if (overlapX(ra, rb) > -TIGHT + 0.5 && overlapY(ra, rb) > -TIGHT + 0.5) {
+        spacingFlag('L8', `${describe(a.el)} + ${describe(b.el)}`, `two overlays on ${describe(a.host.el)} touch or cover each other — keep them at least ${TIGHT}px apart`, { rule: 'overlays touch', design: designOf(a.el), at: [a.el, b.el] });
+      }
+    }
+  }
+
+  // ── L9 fixed and floating ─────────────────────────────────────────────────────────────────────
+  // A floating button or bar sits on the page's edge from the window's side, covers no other floating thing, and at the
+  // end of the page covers no content: the page leaves room for it. Measured on one store: a WhatsApp button 16px from
+  // the window against a 48px page edge, and at the page end over the bottom bar's "How we earn money".
+  if (!scoped) {
+    const floats = qa('body *').filter((el) => csOf(el).position === 'fixed' && ext.has(el) && !hidden(el)
+      && !openPanels.some((p) => p === el || p.contains(el) || el.contains(p))).filter((el) => {
+      const r = box(el);
+      return r.width < W * 0.6 && r.height < window.innerHeight * 0.5 && r.width > 0;
+    }).filter((el, i, all) => !all.some((o) => o !== el && o.contains(el)));
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const inFixed = (n) => { for (let a = n; a && a !== document.body; a = a.parentElement) if (csOf(a).position === 'fixed') return true; return false; };
+    for (const el of floats) {
+      const r = box(el);
+      const toStart = r.left - L0;
+      const toEnd = R0 - r.right;
+      // A centred dialog floats nowhere near a side: it is a panel, judged as one when it is open.
+      if (Math.abs(toStart - toEnd) <= 4 || el.getAttribute('role') === 'dialog' || el.getAttribute('aria-modal') === 'true') continue;
+      const d = Math.min(toStart, toEnd);
+      if (Math.abs(d - EDGE) > 2) {
+        spacingFlag('L9', describe(el), `a floating ${describe(el)} sits ${round(d)}px from the window's ${(toStart < toEnd) !== rtl ? 'start' : 'end'} side; the page edge is ${EDGE}px — float it on the page's edge`,
+          { rule: 'floating edge', measured: round(d), expected: EDGE, design: designOf(el), at: el });
+      }
+      for (const o of floats) {
+        if (o === el || o.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_PRECEDING) continue;
+        const ro = box(o);
+        if (overlapX(r, ro) > 0 && overlapY(r, ro) > 0) spacingFlag('L9', `${describe(el)} + ${describe(o)}`, 'two floating things cover each other — stack them, with a step between', { rule: 'floating overlap', design: designOf(el), at: [el, o] });
+      }
+      // At the page's end, the window shows the last screen: what lies under the floating thing there.
+      const atEnd = { left: r.left, right: r.right, top: r.top + window.scrollY + (maxScroll - window.scrollY), bottom: r.bottom + window.scrollY + (maxScroll - window.scrollY) };
+      const under = inks.find((k) => k.kind !== 'box' && !inFixed(k.el)
+        && overlapX(k.r, atEnd) > 1 && overlapY({ top: k.r.top + window.scrollY, bottom: k.r.bottom + window.scrollY }, atEnd) > 1);
+      if (under) {
+        spacingFlag('L9', describe(el), `at the end of the page ${describe(el)} covers ${wordsOf(under.el) ? `"${wordsOf(under.el)}"` : describe(under.el)} — leave room for it under the last content (at least its height and a step)`,
+          { rule: 'covers content at the end', design: designOf(el), at: [el, under.el] });
+      }
     }
   }
 
@@ -1084,24 +1635,24 @@
   const clipMemo = new Map();
   const clipsX = (a) => { if (!clipMemo.has(a)) clipMemo.set(a, getComputedStyle(a).overflowX !== 'visible'); return clipMemo.get(a); };
   const clippedInside = (el, stop) => { for (let a = el.parentElement; a && a !== stop && a !== document.body && a !== document.documentElement; a = a.parentElement) if (clipsX(a)) return true; return false; };
-  const pageW = document.documentElement.clientWidth;
+  const pageW = W;
   const past = qa('body *').filter((el) => {
     if (SKIP.has(el.tagName.toUpperCase()) && el.tagName !== 'IMG') return false;
     const r = box(el);
-    if (!(r.right > pageW + 1 || r.left < -1) || r.width === 0 || hidden(el)) return false;
+    if (!(r.right > R0 + 1 || r.left < L0 - 1) || r.width === 0 || hidden(el)) return false;
     if (getComputedStyle(el).position === 'fixed' || clippedInside(el, null)) return false;
     return true;
   });
   const outermost = past.filter((el) => !past.some((o) => o !== el && o.contains(el)));
   for (const el of outermost.slice(0, 3)) {
     const r = box(el);
-    flag('overflow', describe(el), `reaches ${r.left < -1 ? `${round(-r.left)}px past the window's left edge` : `${round(r.right - pageW)}px past the window's right edge`} (a ${pageW}px window) — ${document.documentElement.scrollWidth > pageW + 1 ? 'the page scrolls sideways' : 'what is out there is cut off'}; size it to its container`);
+    flag('overflow', describe(el), `reaches ${r.left < L0 - 1 ? `${round(L0 - r.left)}px past the window's left edge` : `${round(r.right - R0)}px past the window's right edge`} (a ${pageW}px window) — ${document.documentElement.scrollWidth > pageW + 1 ? 'the page scrolls sideways' : 'what is out there is cut off'}; size it to its container`);
   }
   for (const { list, cards } of cardLists) {
     const out = [];
     for (const c of cards) {
       if (clipsX(c.el)) continue;
-      for (const k of qa(TAPPABLE, c.el).filter((k) => !hidden(k))) {
+      for (const k of qa(TAPPABLE, c.el).filter((k) => !hidden(k) && !clippedInside(k, c.el))) {
         const r = box(k);
         if (r.right > c.r.right + 1 || r.left < c.r.left - 1) { out.push(k); break; }
       }
@@ -1233,6 +1784,44 @@
     }
   }
 
+  // ── the strips: what was measured, drawn on the page ──────────────────────────────────────────
+  // With `window.CL_SPACING.draw` set, every ink is outlined (text blue, photos green, boxes orange), every gap between
+  // neighbours is labelled in px (green on a step, red off it), the page edge ruler is a dashed line, and every finding
+  // is boxed in red with its law. Screenshot the page window by window (the runner does) and open every strip.
+  if (SP && SP.draw) {
+    document.querySelectorAll('[data-cl-joins-draw]').forEach((n) => n.parentNode.removeChild(n));
+    const layer = document.createElement('div');
+    layer.setAttribute('data-cl-joins-draw', '');
+    layer.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+    const sx = window.scrollX;
+    const sy = window.scrollY;
+    const mark = (r, css, label) => {
+      const d = document.createElement('div');
+      d.style.cssText = `position:absolute;left:${r.left + sx}px;top:${r.top + sy}px;width:${Math.max(1, r.right - r.left)}px;height:${Math.max(1, r.bottom - r.top)}px;box-sizing:border-box;${css}`;
+      if (label) {
+        const t = document.createElement('span');
+        t.textContent = label;
+        t.style.cssText = 'position:absolute;left:0;top:-13px;font:600 10px/12px Arial,sans-serif;background:#fff;color:#111;padding:0 2px;white-space:nowrap';
+        d.appendChild(t);
+      }
+      layer.appendChild(d);
+    };
+    const tint = { text: 'rgba(0,110,255,.35)', media: 'rgba(0,160,90,.5)', box: 'rgba(255,130,0,.5)', line: 'rgba(160,0,200,.5)' };
+    for (const k of inks) mark(k.r, `outline:1px solid ${tint[k.kind]}`);
+    for (const pr of pairs) {
+      if (pr.gap <= 0.5 || pr.gap > maxStep * 2) continue;
+      const [a, b] = [ext.get(pr.a), ext.get(pr.b)];
+      const off = !onStep(pr.gap, insideControl(pr.p) ? INNER : [TIGHT]);
+      const r = pr.axis === 'y' ? { left: Math.max(a.left, b.left) + 6, right: Math.max(a.left, b.left) + 8, top: a.bottom, bottom: b.top }
+        : { left: rtl ? b.right : a.right, right: rtl ? a.left : b.left, top: Math.max(a.top, b.top) + 6, bottom: Math.max(a.top, b.top) + 8 };
+      mark(r, `background:${off ? '#e00000' : '#00a000'}`, `${round(pr.gap)}`);
+    }
+    const edgeX = rtl ? R0 - EDGE : L0 + EDGE;
+    mark({ left: edgeX, right: edgeX + 1, top: -sy, bottom: document.documentElement.scrollHeight - sy }, 'border-left:1px dashed rgba(0,150,0,.9)');
+    for (const [f, els] of anchors) for (const el of els) if (el && el.getBoundingClientRect) mark(box(el), 'outline:2px solid #e00000', `${f.check}${f.rule ? ` ${f.rule}` : ''}`);
+    document.documentElement.appendChild(layer);
+  }
+
   const shownOpen = shownCollapsibles.filter((c) => c.open).length;
   const openCollapsibles = shownOpen;
   const collapsibles = shownCollapsibles.length;
@@ -1248,9 +1837,14 @@
     opened: said(window.CL_JOINS_OPEN),
     overlays_open: openPanels.map(describe),
     judged: scoped ? 'the open overlay only' : 'the whole page',
-    viewport: { width: window.innerWidth, height: window.innerHeight },
+    // The window, and the width the page was laid out in (a classic scrollbar takes ~15px; a frame can be clamped by
+    // its parent): a "390" run measured 375px wide is not a phone measurement.
+    viewport: { width: window.innerWidth, height: window.innerHeight, content_width: W },
+    touch: window.matchMedia('(pointer: coarse)').matches,
+    phone_browser: /Mobi/.test(navigator.userAgent) || !!(navigator.userAgentData && navigator.userAgentData.mobile),
+    spacing: { steps_from: given ? (SP.source || "the store's Spacing designs") : "the plugin's shipped Spacing designs — no store record given (window.CL_SPACING)",
+      screen: phoneSteps ? 'phone' : 'computer', steps: STEPS, page_edge: EDGE, T },
     collapsibles, open_collapsibles: openCollapsibles,
-    rhythm: rhythm ? { stack: Number(rhythm.stack), section: Number(rhythm.section) || null, edge: edgeWant } : (edgeWant ? { edge: edgeWant } : null),
     unreadable_stylesheets: unreadable,
     scoped_rules: scopedRules,
     findings,
@@ -1258,7 +1852,9 @@
   console.log(JSON.stringify(result, null, 2));
   console.info(`joins.js: ${findings.length} finding(s) at ${window.innerWidth}×${window.innerHeight}, ${openCollapsibles} of ${collapsibles} collapsible(s) open.`
     + (collapsibles ? ' Run it again with every collapsible in the other state.' : '')
-    + (rhythm ? '' : ' Spacing NOT checked: set window.CL_JOINS_RHYTHM = { stack, section } (the store\'s density) and run it again.')
+    + (given ? '' : " Spacing measured against the plugin's SHIPPED steps: set window.CL_SPACING to the store's own (its Spacing designs) and run it again.")
+    + (phone && !/Mobi/.test(navigator.userAgent) && !(navigator.userAgentData && navigator.userAgentData.mobile) ? ' This is not a phone browser: the store may serve phones other HTML — measure a phone width with a phone user agent.' : '')
+    + (phone && W < window.innerWidth - 1 ? ` The page was laid out ${W}px wide in a ${window.innerWidth}px window (a scrollbar): hide it to measure a phone width.` : '')
     + (phone ? '' : ' Tap targets NOT checked: they are judged on a phone only — run it again at 390×844.')
     + (scopedRules === null ? ' Scoped CSS NOT checked: this browser has no @scope (scoped_rules: null).' : '')
     + (unreadable.length ? `\n${unreadable.length} stylesheet(s) could not be read (another origin): a browser-default finding is marked certain: false.` : ''));

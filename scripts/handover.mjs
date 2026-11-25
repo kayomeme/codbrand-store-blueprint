@@ -6,7 +6,7 @@
  *                     [--block-kept <custom-block-id> "why this build did not write it"] …
  *                     [--floating-bar "why the merchant wants a header bar only as wide as its content"]
  *                     [--utc-intended "why the store's customers keep UTC"]
- *                     --joins <folder holding the browser pass: one joins.js result per .json file>
+ *                     --joins <the live check's folder: live-check.mjs's results, or joins.js results saved by hand>
  *
  * `preflight.mjs` asks whether a build can START. This asks whether it may END. It is the
  * UNCONDITIONAL gate: `match.mjs` only runs when the merchant named a reference site, which most of
@@ -150,10 +150,12 @@
  *  27. THE HOST'S BOT CHECK. Reads are paced; a challenge page the host answers instead of the store is
  *      waited out, then reported as the host's, never as a missing permission.
  *
- *  28. NO BROWSER PASS. What a shopper sees is checked in the browser by joins.js, and the gate takes its
- *      saved results (`--joins <folder>`), not a word that it ran: every page type at a phone, a tablet and
- *      a desktop width, every overlay the store has open, every finding fixed or given a reason (see
- *      checkJoins()). Text left at a text design of 0 on a dark page is warned about beside it.
+ *  28. NO LIVE CHECK. What a shopper sees is checked in the browser by live-check.mjs (joins.js on every page),
+ *      and the gate takes its saved results (`--joins <folder>`), not a word that it ran: every page the store
+ *      shows at a phone, a medium, an expanded and a large width, every overlay the store has open, measured
+ *      against the store's own steps; every finding fixed or accepted with an id — a known plugin limit or the
+ *      merchant's decision — never a sentence (see checkJoins()). Text left at a text design of 0 on a dark page is
+ *      warned about beside it.
  *
  *  29. A FONT ON GOOGLE. An active Google font still loading from Google (`hosting: google`) is named, with the
  *      fix (see checkFontHosting()).
@@ -203,7 +205,7 @@ if (floatAt !== -1) flagValues.add(floatAt + 1);
 const utcAt = argv.findIndex((a) => a === '--utc-intended');
 const utcReason = utcAt === -1 ? null : (argv[utcAt + 1] ?? '');
 if (utcAt !== -1) flagValues.add(utcAt + 1);
-/* `--joins <folder>`: this build's browser pass — one joins.js result per .json file, as joins.js prints it. */
+/* `--joins <folder>`: this build's live check — live-check.mjs's folder, or joins.js results saved one per .json file. */
 const joinsAt = argv.findIndex((a) => a === '--joins');
 const joinsDir = joinsAt === -1 ? null : (argv[joinsAt + 1] ?? '');
 if (joinsAt !== -1) flagValues.add(joinsAt + 1);
@@ -1020,7 +1022,7 @@ function differs(band, page) {
  * it sets one. An empty style leaves the THEME's colour showing, which the api cannot see:
  * that is unresolved.
  */
-async function readPageBackgrounds(call, R, resolve, designs) {
+async function readPageBackgrounds(call, R, resolve, designs, presetsById) {
   const colourOf = (css, emptyWhy) => {
     const p = paintOf(cascade(new Map(), css), resolve);
     if (p.colour) {
@@ -1037,20 +1039,27 @@ async function readPageBackgrounds(call, R, resolve, designs) {
     : colourOf(res.body?.settings?.page_background_style ?? '',
       'the store sets no page background, so the theme\'s colour shows and the api cannot see it');
   const productCss = designs.find((d) => d.type === 'product')?.settings?.product_page_style;
-  return { store, product: productCss ? colourOf(productCss, null) : null, modes: widthModeInsets(res) };
+  return { store, product: productCss ? colourOf(productCss, null) : null, modes: widthModeInsets(res, presetsById) };
 }
 
 /**
  * The side padding each width mode gives what it holds, per breakpoint, from the store's own compiled
  * rules (store_settings → global layout; plugin `comps/store/…/global_layout/v1/generated_css.php`):
- * `cl-full-width` sets none, `cl-boxed-mode` sets 0, the two padded modes carry `full_width_padded_style`
- * / `boxed_mode_padded_style`, and on phones their `*_mobile_style` overrides what it declares. `null`
- * when store_settings could not be read.
+ * `cl-full-width` sets none, `cl-boxed-mode` sets 0, and the two padded modes the store's page edge: since the
+ * plugin's spacing standard one Spacing design (`page_edge_space_preset`, its computer and phone value); before it
+ * `full_width_padded_style` / `boxed_mode_padded_style` and their `*_mobile_style`. `null` when store_settings could
+ * not be read.
  */
-function widthModeInsets(res) {
+function widthModeInsets(res, presetsById) {
   if (res.status !== 200) return null;
   const s = res.body?.settings ?? {};
   const at = (css, mobile) => { const desktop = cascade(new Map(), css); return { desktop, phone: cascade(new Map(desktop), mobile) }; };
+  const edge = s.page_edge_space_preset !== undefined && presetsById ? spaceOf(s.page_edge_space_preset, presetsById) : null;
+  if (edge) {
+    const side = (n) => `padding-left:${n}px;padding-right:${n}px`;
+    const padded = at(side(edge.desktop), side(edge.phone));
+    return { 'cl-full-width': at('', ''), 'cl-boxed-mode': at('padding-left:0;padding-right:0', ''), 'cl-full-width-padded': padded, 'cl-boxed-mode-padded': padded };
+  }
   return {
     'cl-full-width': at('', ''),
     'cl-boxed-mode': at('padding-left:0;padding-right:0', ''),
@@ -1615,13 +1624,23 @@ async function checkFontHosting(call, R) {
     '    `"http": 503` and the copy failed, tell the merchant that font loads from Google, and why.'] };
 }
 
-/* The lists whose cards stand side by side or one under another: the key holding the space between the
- * cards, and the card's own look (a card design, and a style on the same element). */
+/* The lists whose cards stand side by side or one under another: the keys holding the space between the cards
+ * (Spacing designs since the plugin's spacing standard: one side by side, one one under the other; before it a `gap` in
+ * a container style), and the card's own look (a card design, and a style on the same element). */
 const CARD_LISTS = {
-  plist1: { gap: 'plist1_products_container_style', preset: 'single_product_preset', style: 'single_product_style', cards: 'product cards' },
-  catlist: { gap: 'cl_categories_container_style', preset: 'category_item_preset', style: 'category_item_style', cards: 'category cards' },
-  reviewlist: { gap: 'cl_reviews_container_style', preset: 'review_item_preset', style: 'review_item_style', cards: 'review cards' },
+  plist1: { columns: 'plist1_columns_space_preset', rows: 'plist1_rows_space_preset', gap: 'plist1_products_container_style', preset: 'single_product_preset', style: 'single_product_style', cards: 'product cards' },
+  catlist: { columns: 'catlist_columns_space_preset', rows: 'catlist_rows_space_preset', gap: 'cl_categories_container_style', preset: 'category_item_preset', style: 'category_item_style', cards: 'category cards' },
+  reviewlist: { columns: 'reviewlist_columns_space_preset', rows: 'reviewlist_rows_space_preset', beside: 'summary_reviews_beside_space_preset', gap: 'cl_reviews_container_style', preset: 'review_item_preset', style: 'review_item_style', cards: 'review cards' },
 };
+/* A Spacing design's two values — computer and phone (px) — or null when the id names none; `0` is no space. */
+function spaceOf(id, presetsById) {
+  if (String(id ?? '').trim() === '0') return { desktop: 0, phone: 0 };
+  const p = presetsById.get(String(id));
+  if (!p || p.type !== 'spacing') return null;
+  const n = (css) => { const m = String(css || '').match(/(?:gap|margin[a-z-]*|padding[a-z-]*)\s*:\s*(-?\d+(?:\.\d+)?)px/); return m ? Number(m[1]) : null; };
+  const desktop = n(p.css_default);
+  return desktop === null ? null : { desktop, phone: n(p.css_mobile) ?? desktop };
+}
 /* A page design that shows a list through a design it names itself, not the store's: [page type, the key
  * naming the list design, the list type, the prefix of the page's keys that override the list's own]. */
 const LIST_TEMPLATES = [['product', 'reviews_design_template', 'reviewlist', 'reviews_'], ['category', 'design_template', 'plist1', '']];
@@ -1692,19 +1711,43 @@ async function checkListGaps(call, R, designs, presetsById, resolve) {
   for (const { d, label, over } of uses) {
     const spec = CARD_LISTS[d.type];
     const s = d.settings;
+    const get = (k) => over(k) ?? s[k];
+    const slider = String(get('pagination_type')) === 'slider';
+    const oneColumn = ['columns_desktop', 'columns_mobile'].every((k) => String(get(k)) === '1');
+    if (spec.columns in s) {
+      const col = spaceOf(get(spec.columns), presetsById);
+      const row = spaceOf(get(spec.rows), presetsById);
+      if (!col || !row) {
+        notes.push(`${label}: \`${!col ? spec.columns : spec.rows}\` names no Spacing design of this store, so its cards were NOT checked for touching.`);
+        continue;
+      }
+      checked++;
+      const zero = (v) => v.desktop === 0 || v.phone === 0;
+      const touch = [];
+      if (zero(col) && (slider || !oneColumn)) touch.push('side by side');
+      if (zero(row) && !slider) touch.push('one under the next');
+      const bes = spec.beside ? spaceOf(get(spec.beside), presetsById) : null;
+      const beside = d.type === 'reviewlist' && yes(s.summary_is_active) && s.summary_position === 'beside' && s.summary_reviews_is_active !== 'no' && !!bes && zero(bes);
+      if (!touch.length && !beside) continue;
+      const preset = presetAt(presetsById.get(String(s[spec.preset])));
+      const edge = (preset && (cardEdge(preset.desktop, resolve) || cardEdge(preset.phone, resolve))) || cardEdge(cascade(new Map(), s[spec.style]), resolve);
+      if (!edge) continue;
+      const where = [touch.length ? `the cards touch ${touch.join(' and ')}` : '', beside ? 'the summary beside them touches the first card' : ''].filter(Boolean).join(', and ');
+      const keys = [touch.includes('side by side') ? spec.columns : '', touch.includes('one under the next') ? spec.rows : '', beside ? spec.beside : ''].filter(Boolean);
+      notes.push(`${label}: 0px between its ${spec.cards} (${keys.map((k) => `\`${k}\`: 0`).join(', ')}), and each card draws ${edge}\n` +
+        '    — ' + where + '. Unless the reference joins its cards on purpose, point those keys at a Spacing design (references/spacing.md).');
+      continue;
+    }
     if (!(spec.gap in s)) {
-      notes.push(`${label}: this install's design has no \`${spec.gap}\`, so its cards were NOT checked for touching.`);
+      notes.push(`${label}: this install's design has neither \`${spec.columns}\` nor \`${spec.gap}\`, so its cards were NOT checked for touching.`);
       continue;
     }
     checked++;
-    const get = (k) => over(k) ?? s[k];
     const css = cascade(new Map(), s[spec.gap]);
     const [r, c = r] = tokens(css.get('gap')?.value ?? '');
     const row = css.get('row-gap')?.value ?? r;
     const col = css.get('column-gap')?.value ?? c;
     const zero = (v) => v !== undefined && (isZeroLength(v) || /^normal$/i.test(v));
-    const slider = String(get('pagination_type')) === 'slider';
-    const oneColumn = ['columns_desktop', 'columns_mobile'].every((k) => String(get(k)) === '1');
     const touch = [];
     if (zero(col) && (slider || !oneColumn)) touch.push('side by side');
     if (zero(row) && !slider) touch.push('one under the next');
@@ -2406,96 +2449,152 @@ async function soldElsewhere(products, call, R, ctx) {
 }
 
 /**
- * 28 — THE BROWSER PASS. Every check above reads the api; what a shopper sees is checked in the browser by joins.js
- * (order-of-work.md → phase 10), and this gate takes its saved results, never a word that it ran (`--joins
- * <folder>`, one result per .json file, as joins.js prints it). It fails unless they cover home, a category and a
- * product page — and the cart and the checkout where the store shows them as pages (`stores` → `cart_mode`,
- * `checkout_mode` `in_page`) — each at a phone (under 768px), a tablet (768–1199px) and a desktop width (1200px or
- * more), with no overlay open; the quick view, the cart drawer (`cart_mode` `modal_left` / `modal_right`) and the
- * checkout pop-up (`checkout_mode` `modal`) the store has, each open, at a phone and a desktop width — joins.js
- * records the label it was given (CL_JOINS_PAGE, CL_JOINS_OPEN) and sees for itself whether a panel is open. Each
- * result: of this site, with the store's spacing set, under a day old (the api says nothing of when a design last
- * changed, so an older pass is not a current fact). Each finding: fixed, or listed in that result's `accepted`
- * ({ check, where, why }) with a reason. Measured on one build: the gate passed (12 ✓) while joins.js, run with the
- * rhythm, found 7 of 29 joins off it on the home page and 12–19 small targets on every page, and 768 never ran.
+ * 28 — THE LIVE CHECK. Every check above reads the api; what a shopper sees is checked in the browser by
+ * scripts/live-check.mjs (or joins.js pasted by hand: references/spacing.md → "The check"), and this gate takes their
+ * saved results, never a word that they ran (`--joins <folder>`). It fails unless they cover every page the store
+ * shows — home, a category, the all-products page, a product, a missing page, and every published page — each at a
+ * phone (under 768px), a medium (768–1023), an expanded (1024–1199) and a large width (1200 and more), and each overlay
+ * the store has (the quick view, the cart drawer, the checkout pop-up) open at those widths. A result counts when it is
+ * of this site, under a day old, measured by a joins.js with the spacing laws against the STORE's steps (its Spacing
+ * designs), at a phone width in a phone's browser (the store prints other HTML for phones) and laid out at the width
+ * it says. Each finding: fixed — or accepted with an id, never a sentence: `{ "check", "where", "ledger": "<id>" }`
+ * for a known limit of this plugin version (KNOWN_LIMITS), `{ "check", "where", "decision": "<id>" }` for a decision
+ * the merchant took, recorded in the blueprint's `spacing.decisions`. Measured on one build: every finding of the
+ * old pass carried a written reason, and the gate passed while the merchant's marked faults stood on the store.
  */
-function checkJoins(dir, site, store, quickview) {
-  const how = '      Run scripts/joins.js as order-of-work.md → phase 10 says, save each result it prints as a .json file in one\n' +
-    '      folder, and pass the folder: --joins <folder>.';
+const KNOWN_LIMITS = [
+  // { id, check, design (the finding's `design` starts with), where (pattern), what, fixed_in (plugin version, or null) }
+  { id: 'popup-close-40px', check: 'small-target', where: /cl-modal-close-x/, what: "every pop-up's, drawer's and quick view's close is drawn 40 × 40 with no tap area", fixed_in: '1.2.2038' },
+  { id: 'footer-contact-tap-area', check: 'small-target', design: /^footer/, where: /contact|social/i, what: "the footer's contact and social links have no tap area and no key to give them one", fixed_in: '1.2.2037' },
+  { id: 'affiliate-box-spaces', check: 'L6', design: /^affiliate/, where: /affiliate/i, what: "the affiliate box's two spaces are px numbers, one value for every width, outside the Spacing designs", fixed_in: null },
+];
+const BANDS = [['phone', (w) => w < 768], ['medium', (w) => w >= 768 && w < 1024], ['expanded', (w) => w >= 1024 && w < 1200], ['large', (w) => w >= 1200]];
+const bandOf = (w) => BANDS.find(([, t]) => t(w))?.[0] ?? 'large';
+const olderThan = (v, fix) => { const a = parseVersion(v); const b = parseVersion(fix); if (!a || !b) return true; for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+function knownLimitOf(fd, pluginVersion) {
+  return KNOWN_LIMITS.find((k) => k.check === fd.check && (!k.design || k.design.test(String(fd.design ?? ''))) && (!k.where || k.where.test(String(fd.where ?? '')))
+    && (k.fixed_in === null || olderThan(pluginVersion, k.fixed_in))) || null;
+}
+
+function checkJoins(dir, site, store, quickview, ctx = {}) {
+  const how = '      Run scripts/live-check.mjs <site> <key> (references/spacing.md → "The check") and pass its folder: --joins <folder>.\n' +
+    '      A page it cannot open (a host\'s bot check): joins.js pasted into the page, each result saved as a .json file there.';
   if (!dir) {
-    return { problems: ['NO BROWSER PASS: no joins.js result was given (--joins <folder>), so nothing a shopper sees on a page\n' +
-      `      was checked — only what the api says.\n${how}`] };
+    return { problems: ['NO LIVE CHECK: no result was given (--joins <folder>), so nothing a shopper sees on a page was checked —\n' +
+      `      only what the api says.\n${how}`] };
   }
   let files;
   try { files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.json')); } catch (e) {
-    return { problems: [`NO BROWSER PASS: the folder ${dir} could not be read (${e.code || e.message}).\n${how}`] };
+    return { problems: [`NO LIVE CHECK: the folder ${dir} could not be read (${e.code || e.message}).\n${how}`] };
   }
+  // A page by its path (the host is checked on its own, below).
+  const norm = (u) => { try { return new URL(u).pathname.replace(/\/+$/, '').toLowerCase(); } catch { return String(u); } };
   const hostOf = (u) => new URL(u).host.replace(/^www\./i, '');
   const host = hostOf(site);
   const results = [];
   const refused = [];
+  const notes = [];
   for (const f of files) {
     let j;
     try { j = JSON.parse(readFileSync(join(dir, f), 'utf8')); } catch { refused.push(`${f}: not JSON`); continue; }
+    if (j?.tool === 'live-check.mjs') {
+      for (const n of asArray(j.not_measured) ?? []) notes.push(`not measured by the live check: ${n}`);
+      for (const p of asArray(j.pages) ?? []) for (const e of asArray(p.errors) ?? []) notes.push(`${p.url} — ${e}`);
+      continue;
+    }
     if (j?.tool !== 'joins.js' || !Array.isArray(j.findings)) { refused.push(`${f}: not a joins.js result`); continue; }
     let h = '';
     try { h = hostOf(j.source); } catch { /* reported below */ }
     const at = Date.parse(j.measured_at ?? '');
+    const w = Number(j.viewport?.width) || 0;
+    const laidOut = Number(j.viewport?.content_width) || w;
     if (h !== host) refused.push(`${f}: measured ${j.source || 'no page'}, not this site`);
     else if (!(at > 0)) refused.push(`${f}: no measured_at — a joins.js older than this gate: run the one beside it`);
     else if (Date.now() - at > 24 * 3600e3) refused.push(`${f}: measured ${j.measured_at}, over a day ago — measure again`);
-    else if (!(Number(j.rhythm?.stack) > 0)) refused.push(`${f}: measured without the store's spacing (CL_JOINS_RHYTHM)`);
+    else if (!j.spacing) refused.push(`${f}: measured by a joins.js without the spacing laws — run the one beside this gate`);
+    else if (/shipped/i.test(String(j.spacing.steps_from ?? ''))) refused.push(`${f}: measured against the plugin's shipped steps, not this store's — set window.CL_SPACING (or use live-check.mjs)`);
+    else if (w < 768 && j.phone_browser === false) refused.push(`${f}: a phone width (${w}px) in a computer's browser — the store prints other HTML for phones: a phone user agent`);
+    else if (w <= 1024 && Math.abs(laidOut - w) > 1) refused.push(`${f}: laid out ${laidOut}px wide in a ${w}px window (a scrollbar, a clamped frame) — not a ${w}px measurement`);
     else if (j.opened && !(asArray(j.overlays_open) ?? []).length) refused.push(`${f}: labelled "${j.opened}" open, but joins.js saw no panel open`);
-    else results.push({ f, j, w: Number(j.viewport?.width) || 0 });
+    else results.push({ f, j, w: laidOut, page: norm(j.source), type: String(j.page_type ?? '').trim().toLowerCase(), opened: String(j.opened ?? '').trim().toLowerCase() });
   }
-  const band = (w) => (w < 768 ? 'phone' : w < 1200 ? 'tablet' : 'desktop');
-  const label = (v) => String(v ?? '').trim().toLowerCase();
-  const pages = ['home', 'category', 'product'];
-  if (String(store?.cart_mode ?? '') === 'in_page') pages.push('cart');
-  if (String(store?.checkout_mode ?? '') === 'in_page') pages.push('checkout');
+  // What the store shows: every published page, and the page types a shopper meets.
+  const want = [];
+  const homeKey = norm(site);
+  want.push({ name: 'home', ok: (r) => r.page === homeKey || r.type === 'home' });
+  want.push({ name: 'a category', ok: (r) => r.type === 'category' || /\/product[_-]cat(egory)?\//.test(r.page) });
+  want.push({ name: 'the all-products page', ok: (r) => r.type === 'all products' || /\/product$/.test(r.page) });
+  want.push({ name: 'a product', ok: (r) => r.type.startsWith('product') && r.type !== 'products' || /\/product\/[^/]+$/.test(r.page) });
+  want.push({ name: 'a missing page (404)', ok: (r) => r.type === '404' });
+  const thankyouId = Number(store?.thankyou_page_id);
+  for (const p of ctx.pages ?? []) {
+    if (String(p.status ?? 'publish') !== 'publish' || !p.url || Number(p.id) === thankyouId) continue;
+    const key = norm(p.url);
+    if (key === homeKey) continue;
+    want.push({ name: `page "${clip(String(p.title ?? p.slug ?? key), 30)}"`, ok: (r) => r.page === key });
+  }
+  const missing = [];
+  for (const wnt of want) {
+    const bands = BANDS.map(([b]) => b).filter((b) => !results.some((r) => !r.opened && wnt.ok(r) && bandOf(r.w) === b));
+    if (bands.length) missing.push(`${wnt.name} at a ${bands.join(', ')} width`);
+  }
   const overlays = [];
   if (quickview) overlays.push('quick view');
   if (/^modal_(left|right)$/.test(String(store?.cart_mode ?? ''))) overlays.push('cart drawer');
   if (String(store?.checkout_mode ?? '') === 'modal') overlays.push('checkout popup');
-  const missing = [];
-  for (const p of pages) {
-    for (const b of ['phone', 'tablet', 'desktop']) {
-      if (!results.some((r) => label(r.j.page_type) === p && !r.j.opened && band(r.w) === b)) missing.push(`${p} at a ${b} width`);
-    }
-  }
   for (const o of overlays) {
-    for (const b of ['phone', 'desktop']) {
-      if (!results.some((r) => label(r.j.opened) === o && band(r.w) === b)) missing.push(`the ${o} open at a ${b} width`);
-    }
+    const bands = BANDS.map(([b]) => b).filter((b) => !results.some((r) => r.opened === o && bandOf(r.w) === b));
+    if (bands.length) missing.push(`the ${o} open at a ${bands.join(', ')} width`);
   }
+  if (thankyouId && !results.some((r) => r.type === 'thank-you')) notes.push('the thank-you page was NOT measured: it needs an order — pass live-check.mjs --thankyou <its address after a test order>');
+  // Each finding: fixed, or accepted with an id that holds.
+  const decisionIds = new Set((asArray(ctx.decisions) ?? []).map((d) => String(d?.id ?? '').trim()).filter(Boolean));
   const open = [];
+  const badIds = [];
+  const freeText = [];
   for (const r of results) {
     const accepted = asArray(r.j.accepted) ?? [];
     for (const fd of r.j.findings) {
       const a = accepted.find((x) => x?.check === fd.check && x?.where === fd.where);
-      if (!(a && String(a.why ?? '').trim().length >= MIN_REASON)) open.push({ r, fd, short: !!a });
+      const limit = knownLimitOf(fd, ctx.pluginVersion);
+      if (a?.ledger !== undefined) {
+        if (limit && String(a.ledger) === limit.id) continue;
+        const k = KNOWN_LIMITS.find((x) => x.id === String(a.ledger));
+        badIds.push(`${r.f}: ${fd.check} ${clip(String(fd.where), 40)} — ledger "${a.ledger}" ${!k ? 'is no known limit' : k.fixed_in && !olderThan(ctx.pluginVersion, k.fixed_in) ? `was fixed in plugin ${k.fixed_in}: fix the finding` : 'does not match this finding'}`);
+      } else if (a?.decision !== undefined) {
+        if (decisionIds.has(String(a.decision))) continue;
+        badIds.push(`${r.f}: ${fd.check} ${clip(String(fd.where), 40)} — decision "${a.decision}" is not in the blueprint's spacing.decisions`);
+      } else if (a) freeText.push(`${r.f}: ${fd.check} ${clip(String(fd.where), 40)}`);
+      open.push({ r, fd, limit });
     }
   }
   const problems = [];
   if (refused.length) {
-    problems.push(`${refused.length} joins.js result(s) do not count:\n` + refused.slice(0, 8).map((x) => `        ${x}`).join('\n') +
+    problems.push(`${refused.length} result(s) do not count:\n` + refused.slice(0, 8).map((x) => `        ${x}`).join('\n') +
       (refused.length > 8 ? `\n        … and ${refused.length - 8} more` : ''));
   }
   if (missing.length) {
-    problems.push(`THE BROWSER PASS IS NOT COMPLETE — no joins.js result (with CL_JOINS_PAGE / CL_JOINS_OPEN set) for:\n` +
-      missing.map((m) => `        ${m}`).join('\n') + '\n' +
-      '      Each page type looks different at each width, and what an overlay holds is checked only while it is open.\n' + how);
+    problems.push(`THE LIVE CHECK IS NOT COMPLETE — no result for:\n` + missing.slice(0, 20).map((m) => `        ${m}`).join('\n') +
+      (missing.length > 20 ? `\n        … and ${missing.length - 20} more` : '') + '\n' +
+      '      Each page looks different at each width, and what an overlay holds is checked only while it is open.\n' + how);
   }
+  if (freeText.length) {
+    problems.push(`${freeText.length} finding(s) accepted with a written reason, which no longer counts:\n` + freeText.slice(0, 6).map((x) => `        ${x}`).join('\n') + '\n' +
+      '      Fix each one, or accept it with an id: "ledger" (a known limit of this plugin, named below when one matches) or\n' +
+      '      "decision" (the merchant\'s, recorded in the blueprint\'s spacing.decisions — blueprint-format.md).');
+  }
+  if (badIds.length) problems.push(`${badIds.length} accepted id(s) do not hold:\n` + badIds.slice(0, 8).map((x) => `        ${x}`).join('\n'));
   if (open.length) {
     const byCheck = new Map();
     for (const o of open) byCheck.set(o.fd.check, (byCheck.get(o.fd.check) ?? 0) + 1);
-    problems.push(`${open.length} joins.js finding(s) neither fixed nor given a reason (${[...byCheck].map(([c, n]) => `${n} ${c}`).join(', ')}):\n` +
-      open.slice(0, 8).map((o) => `        ${o.r.f} @${o.r.w}: ${o.fd.check} ${clip(String(o.fd.where), 50)} — ${clip(String(o.fd.detail), 90)}` +
-        (o.short ? ` (its reason is under ${MIN_REASON} characters)` : '')).join('\n') + (open.length > 8 ? `\n        … and ${open.length - 8} more` : '') + '\n' +
-      '      Fix each one and measure again, or add it to that result\'s "accepted": [{ "check", "where", "why" }] with why\n' +
-      '      this design keeps it.');
+    problems.push(`${open.length} finding(s) neither fixed nor accepted with an id (${[...byCheck].map(([c, n]) => `${n} ${c}`).join(', ')}):\n` +
+      open.slice(0, 10).map((o) => `        ${o.r.f} @${o.r.w}: ${o.fd.check}${o.fd.rule ? ` (${o.fd.rule})` : ''} ${clip(String(o.fd.where), 50)} — ${clip(String(o.fd.detail), 90)}` +
+        (o.limit ? `\n          a known limit of plugin ${ctx.pluginVersion ?? '?'}: ${o.limit.what} — accept with { "check", "where", "ledger": "${o.limit.id}" }` : '')).join('\n') +
+      (open.length > 10 ? `\n        … and ${open.length - 10} more` : '') + '\n' +
+      '      Fix each one and measure again. Only a known plugin limit or a decision the merchant took keeps one: references/spacing.md\n' +
+      '      → "The check". A finding you are sure is wrong is the check\'s fault: say so in your report, with the finding.');
   }
-  return { problems, pass: `the browser pass covers ${pages.length} page type(s) at three widths${overlays.length ? ` and ${overlays.join(', ')} open` : ''}, every finding fixed or given a reason (${results.length} joins.js result(s))` };
+  return { problems, notes, pass: `the live check covers ${want.length} page(s) at four widths${overlays.length ? ` and ${overlays.join(', ')} open` : ''}, every finding fixed or accepted with an id (${results.length} result(s))` };
 }
 
 /**
@@ -3423,7 +3522,7 @@ async function main(base) {
     /* Read only when an unpadded band needs a page to compare with — so a store with none never
      * depends on store_settings being readable. */
     let pagesRead = null;
-    const pageBackgrounds = () => (pagesRead ??= readPageBackgrounds(call, R, resolve, designs));
+    const pageBackgrounds = () => (pagesRead ??= readPageBackgrounds(call, R, resolve, designs, presetsById));
     const bands = await checkBands(designs, presetsById, resolve, pageBackgrounds);
     problems.push(...bands.problems);
     notes.push(...await checkTextAtZero(designs, pageBackgrounds));
@@ -3638,12 +3737,14 @@ async function main(base) {
       '    merchant the site is visible to search engines.');
   }
 
-  /* ── the browser pass: joins.js's saved results ──────────────────────────────────────────────── */
-  const browserPass = checkJoins(joinsDir, base, store, quickviewShown);
+  /* ── the live check: live-check.mjs's (or joins.js's) saved results ──────────────────────────────────────────────── */
+  const browserPass = checkJoins(joinsDir, base, store, quickviewShown, {
+    pages: pagesRead.rows ?? [], pluginVersion: me.body.plugin_version, decisions: recorded?.decisions?.spacing?.value?.decisions });
   problems.push(...browserPass.problems);
+  notes.push(...(browserPass.notes ?? []));
   if (!browserPass.problems.length) {
     line(true, browserPass.pass);
-    passed.push('the browser pass is complete');
+    passed.push('the live check is complete');
   }
 
   if (hostChallenge.count) {

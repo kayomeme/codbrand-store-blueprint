@@ -185,34 +185,10 @@ their joins. Latin-script Darija uses a Latin family normally.
 ## Density
 
 One decision, applied consistently: **airy** (Caregiver, Ruler, Lover) · **structured** (Sage) ·
-**denser** (Everyman) · **punchy** (Magician). Keep it consistent — an airy palette on dense spacing
-reads as a mistake rather than a choice.
-
-It is FOUR NUMBERS, not a word. When a reference was measured, take them from it; otherwise from its
-density, on the 8px grid most design systems space by:
-
-| density | edge inset (desktop / phone) | stack: between blocks of one section | section: between sections | radius |
-|---|---|---|---|---|
-| airy | 64 / 20 | 24 | 96 | 12 |
-| structured | 48 / 16 | 16 | 64 | 6 |
-| denser | 32 / 16 | 12 | 48 | 8 |
-| punchy | 40 / 16 | 16 | 56 | 16 |
-
-Record them in the blueprint's `density` with where they came from. There is no spacing setting of
-its own: write them into the settings that exist — a block's space above it is its container `*_style`
-`margin-top`, a card's inside space and corners are its preset's padding and radius, in `css_default`
-and `css_mobile`; the edge inset is the store's side gutter, desktop and phone (`store_settings`, the global
-layout: `/docs/store_settings`), and a design laid out in another width mode keeps its content on it too. Where the
-store's step is smaller on phones (the reference measured at 390 says so, or the blueprint records a phone step) and a
-style key has no phone value of its own, write the step as `clamp(<phone>px, <desktop ÷ 14.4>vw, <desktop>px)` — for
-12 and 16, `clamp(12px, 1.12vw, 16px)`: 12px at 390, 16px at 1440; style values accept `clamp()` (`/docs/style_brushes`).
-*Measured on one store: product-grid, reviews-list, checkout and offer gaps with no phone value drew 16–24px on phones,
-101 off-rhythm findings; with `clamp()`, 5.* Then check
-them: run `scripts/joins.js` with `window.CL_JOINS_RHYTHM = { stack, section, edge }` set first — each the value
-at the width you measure (the phone numbers under 768px) — and it reports every gap between cards or sections that
-is neither step, and a header, trail, title or footer off the edge. *Measured on one build, with the word and no
-numbers: 0, 4 and 41px between the blocks of one checkout; on another, with the numbers recorded and applied to
-nothing: header 72px from the edge, trail 48, title 64.*
+**denser** (Everyman) · **punchy** (Magician). Its spacing is the store's Spacing designs, edited — the steps, how to
+pick them, how to write them and the nine laws the live check holds them to: `references/spacing.md`. Its corners
+are the card and button presets' radius: airy 12, structured 6, denser 8, punchy 16 (`css_default` and
+`css_mobile`).
 
 ## Icon style
 
